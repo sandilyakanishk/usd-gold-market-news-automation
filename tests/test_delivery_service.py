@@ -77,8 +77,9 @@ def test_step_4_content_survives_delivery_intact(repo, messages):  # noqa: F811
     deliver_message(repo, client, messages["actual"], CHAT, now=T1)
     (_, text), = client.sent
     for part in ("📰 US core PCE inflation comes in above expectations", "🇺🇸 *Core PCE Price Index m/m*",
-                 "Previous: 0.2%", "Forecast: 0.2%", "Actual: *0.3%*", "Result: 🔺 ABOVE FORECAST",
-                 "Priority: 🔴 CRITICAL", "Source: FRED (calendar: Forex Factory)",
+                 "Previous: 0.2%", "Forecast: 0.2%", "Actual: *0.3%*", "*Result:* 📈 ABOVE FORECAST", "+0.1 pts vs forecast",
+                 "🥇 Gold Relevance: 🟢 STRONG · 100/100", "🎯 Priority: 🔴 CRITICAL · 100/100",
+                 "Source: FRED (calendar: Forex Factory)",
                  "_This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis._"):
         assert part in text
     assert text == messages["actual"].text

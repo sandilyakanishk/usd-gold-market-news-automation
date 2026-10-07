@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from ..actuals.models import NOT_AVAILABLE, RELEASED
 from ..actuals.service import EnrichedEvent, is_due
 from ..actuals.surprise import parse_value
-from ..classification.models import PRIORITIES
+from ..classification.models import GOLD_LEVELS, PRIORITIES
 from .headlines import HeadlineRules
 from .models import ACTUAL_RESULT, HIGH_ALERT, MORNING_UPDATE, UPCOMING_REMINDER, Message
 from .templates import MessageTemplates, markdown_safe
@@ -21,6 +21,13 @@ from .templates import MessageTemplates, markdown_safe
 
 def _at_least(priority: str | None, minimum: str) -> bool:
     return priority in PRIORITIES and PRIORITIES.index(priority) <= PRIORITIES.index(minimum)
+
+
+def clock_face(moment: datetime) -> str:
+    """The clock emoji closest to a time: on the hour or on the half hour."""
+    minutes = moment.hour * 60 + moment.minute + 15           # round to the nearest half hour
+    hour, half = (minutes // 60) % 12, (minutes % 60) >= 30
+    return chr((0x1F55C if half else 0x1F550) + (hour - 1) % 12)
 
 
 class ContentBuilder:
@@ -52,7 +59,7 @@ class ContentBuilder:
         event, record, c = item.event, item.record, item.classification
         local = self.local_time(item)
         days_ahead = (local.date() - self.now.astimezone(self.tz).date()).days if local else 0
-        when = self.headlines.when_phrase(days_ahead, local.strftime(self.templates.day_month_format) if local else "")
+        when = self.headlines.when_phrase(days_ahead, self._text(local, self.templates.day_month_format) if local else "")
         state = self.headlines.state(
             event_name=event.event_name, due=is_due(event, self.now), release_status=record.release_status,
             surprise_status=record.surprise_status, actual=event.actual, previous=event.previous)
@@ -61,7 +68,12 @@ class ContentBuilder:
             event_name=event.event_name, category=c.category if c else None, state=state, when=when,
             actual=event.actual or missing, forecast=event.forecast or missing, previous=event.previous or missing)
 
-    def variables(self, item: EnrichedEvent) -> dict[str, str | None]:
+    def _text(self, moment: datetime, pattern: str) -> str:
+        """Format a date or time, optionally without leading zeros ("2:00 PM", "8 October")."""
+        text = moment.strftime(pattern)
+        return text.lstrip("0") or "0" if self.templates.strip_leading_zeros else text
+
+    def variables(self, item: EnrichedEvent, number: int | None = None) -> dict[str, str | None]:
         """Everything a template line may show for one event. None marks a missing value."""
         event, record, c, t = item.event, item.record, item.classification, self.templates
         local = self.local_time(item)
@@ -72,7 +84,7 @@ class ContentBuilder:
 
         display_time = None
         if local:
-            display_time = " ".join(filter(None, [local.strftime(t.time_format), self._timezone_label(local)]))
+            display_time = " ".join(filter(None, [self._text(local, t.time_format), self._timezone_label(local)]))
 
         surprise_known = record.release_status == RELEASED and record.surprise_status != NOT_AVAILABLE
         surprise_value = None
@@ -80,6 +92,9 @@ class ContentBuilder:
             unit = (parse_value(event.actual) or (None, ""))[1]
             surprise_value = f"{record.surprise_value:+g}{unit if unit != '%' else ' pts'}"
         released = record.release_status == RELEASED
+        why = None
+        if c:
+            why = t.why_it_matters.get(c.category) or t.why_it_matters.get("default") or c.gold_relevance_reason
 
         return {
             "headline": headline,
@@ -87,7 +102,14 @@ class ContentBuilder:
             "event_name": event.event_name,  # exactly as Forex Factory supplied it
             "currency": event.currency,
             "currency_flag": t.labels["currency_flag"].get(event.currency, event.currency),
-            "date": local.strftime(t.date_format) if local else event.date,
+            "number": (t.numbers[number - 1] if number <= len(t.numbers) else f"{number}.") if number else None,
+            "clock": clock_face(local) if local else None,
+            # Display-only scale; the Step 2 priority score is a separate value and is not derived from it.
+            "gold_relevance_score": str(t.gold_relevance_score[c.gold_relevance_level]) if c else None,
+            "why_it_matters": why,
+            "alert_title": t.alert_titles.get(event.impact, t.alert_titles["default"]),
+            "result_sentence": t.result_sentences.get(record.surprise_status) if surprise_known else None,
+            "date": self._text(local, t.date_format) if local else event.date,
             "weekday": local.strftime("%A") if local else None,
             "time": local.strftime("%H:%M") if local else event.time,
             "display_time": display_time,
@@ -147,17 +169,21 @@ class ContentBuilder:
                 continue
             if t.daily_require_gold and not c.gold_relevance:
                 continue
-            chosen.append((local.replace(tzinfo=None), item.event.event_name, item))
-        chosen.sort(key=lambda entry: entry[:2])
-        chosen_items = [entry[2] for entry in chosen]
+            rank = (PRIORITIES.index(c.priority), GOLD_LEVELS.index(c.gold_relevance_level)) \
+                if t.daily_order == "priority" else (0, 0)
+            chosen.append((rank, local.replace(tzinfo=None), item.event.event_name, item))
+        # Presentation order only: most important first, then by time. Stored data is not reordered.
+        chosen.sort(key=lambda entry: entry[:3])
+        chosen_items = [entry[3] for entry in chosen]
 
+        day_moment = datetime(day.year, day.month, day.day)
         day_values = {
-            "date": day.strftime(t.date_format), "weekday": day.strftime("%A"),
+            "date": self._text(day_moment, t.date_format), "weekday": day.strftime("%A"),
             "event_count": str(len(chosen_items)), "source": t.calendar_source,
         }
         blocks, covered = [], []
-        for item in chosen_items:
-            values = self.variables(item)
+        for position, item in enumerate(chosen_items, 1):
+            values = self.variables(item, number=position)
             blocks.append(t.render(MORNING_UPDATE, "event", values))
             covered.append({"event_id": item.event.event_id, "event_name": item.event.event_name,
                             "headline": values["headline"]})

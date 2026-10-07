@@ -3,26 +3,29 @@
     "Message templates and selection rules. This file only shapes text; it never changes stored data.",
     "Each template is a list of lines. {name} is replaced by a value; the full list of names is in the README.",
     "{event_name} is always Forex Factory's exact event name. {headline} / {headline_text} is the generated headline. Keep both.",
-    "A missing value is printed as 'missing_value'. A line is dropped entirely when it uses a name listed in 'omit_line_if_missing' and that value is missing.",
+    "A missing value is printed as 'missing_value'. A line is dropped entirely when it uses a name listed in 'omit_line_if_missing' for that message type and the value is missing.",
     "Formatting: *bold* and _italic_ only, so the text reads the same in Telegram and WhatsApp.",
-    "Wording must stay factual: no trade direction and no statement of what any market will do."
+    "Three separate things are shown and must stay separate: Forex Factory's Impact, the bot's Gold Relevance, and the bot's Priority.",
+    "Wording must stay factual: no market direction, no probability, no statement of what any price will do."
   ],
 
-  "templates_version": "1.0.0",
+  "templates_version": "2.0.0",
 
-  "missing_value": "-",
+  "missing_value": "—",
 
   "time": {
     "time_format": "%I:%M %p",
-    "date_format": "%d %b %Y",
+    "date_format": "%d %B %Y",
     "day_month_format": "%d %b",
+    "strip_leading_zeros": true,
     "timezone_labels": {"Asia/Kolkata": "IST"}
   },
 
   "selection": {
-    "_about": "Which events each message type covers. Priorities and Gold relevance come from the Step 2 classification.",
+    "_about": "Which events each message type covers, and in what order. Priorities and Gold relevance come from the Step 2 classification.",
     "daily_minimum_priority": "MEDIUM",
     "daily_require_gold_relevance": true,
+    "daily_order": "priority",
     "alert_requires_highlight": true,
     "alert_only_before_release": true,
     "upcoming_minimum_priority": "HIGH",
@@ -31,17 +34,50 @@
 
   "labels": {
     "currency_flag": {"USD": "🇺🇸"},
-    "impact": {"High": "🔴 HIGH", "Medium": "🟠 MEDIUM", "Low": "🟡 LOW", "Holiday": "⚪ HOLIDAY", "None": "⚪ NONE"},
-    "gold_relevance_level": {"STRONG": "🟢 STRONG", "MODERATE": "🟡 MODERATE", "WEAK": "⚪ WEAK", "NONE": "⚫ NONE"},
+    "impact": {"High": "🔴 High", "Medium": "🟡 Medium", "Low": "⚪ Low", "Holiday": "⚪ Holiday", "None": "⚪ None"},
+    "gold_relevance_level": {"STRONG": "🟢 STRONG", "MODERATE": "🟡 MODERATE", "WEAK": "🟠 WEAK", "NONE": "⚪ NONE"},
+    "gold_relevance_score": {
+      "_about": "Display only: how relevant the event is to this bot's Gold/XAUUSD monitoring framework. Not a probability and not a price forecast. It does not affect the priority score.",
+      "STRONG": 100, "MODERATE": 65, "WEAK": 30, "NONE": 0
+    },
     "priority": {"CRITICAL": "🔴 CRITICAL", "HIGH": "🟠 HIGH", "MEDIUM": "🟡 MEDIUM", "LOW": "⚪ LOW"},
     "surprise_status": {
-      "ABOVE_FORECAST": "🔺 ABOVE FORECAST",
-      "BELOW_FORECAST": "🔻 BELOW FORECAST",
+      "ABOVE_FORECAST": "📈 ABOVE FORECAST",
+      "BELOW_FORECAST": "📉 BELOW FORECAST",
       "IN_LINE_WITH_FORECAST": "➖ IN LINE WITH FORECAST"
     },
+    "result_sentence": {
+      "ABOVE_FORECAST": "The figure came in above the forecast.",
+      "BELOW_FORECAST": "The figure came in below the forecast.",
+      "IN_LINE_WITH_FORECAST": "The figure matched the forecast."
+    },
+    "alert_title": {
+      "_about": "Title of the alert, chosen by Forex Factory impact, so 'HIGH-IMPACT' is only used when the source rates the event High.",
+      "High": "HIGH-IMPACT USD ALERT",
+      "default": "PRIORITY USD ALERT"
+    },
+    "numbers": ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"],
     "yes": "YES",
     "no": "NO",
-    "revision_note": "Revised figure (revision {actual_revision})"
+    "revision_note": "♻️ Revised figure (revision {actual_revision})"
+  },
+
+  "why_it_matters": {
+    "_about": "One sentence per Step 2 category explaining why the event is watched. It must describe relevance only, never a direction. 'default' is used for categories not listed; if that is absent too, the Step 2 relevance reason is shown.",
+    "MONETARY_POLICY": "Fed policy decisions can shift interest-rate expectations and the USD, both of which Gold is sensitive to.",
+    "FED_COMMUNICATION": "Fed communication can influence rate expectations, the USD and Gold.",
+    "INFLATION": "Inflation data can shift rate expectations and USD and yield pricing, making it relevant to Gold.",
+    "EMPLOYMENT": "Labour-market data can influence Fed expectations, the USD and Treasury yields.",
+    "GROWTH": "Growth data can affect rate expectations and broader risk sentiment.",
+    "CONSUMER_ACTIVITY": "Consumer data can influence growth expectations and the policy outlook.",
+    "BUSINESS_ACTIVITY": "Business-activity data feeds into the growth outlook and rate expectations.",
+    "MANUFACTURING": "Manufacturing surveys are an early read on growth and can influence rate expectations.",
+    "SERVICES": "Services-sector data is an early read on growth and can influence rate expectations.",
+    "HOUSING": "Housing data is a secondary input for the growth and rate outlook.",
+    "SENTIMENT": "Sentiment surveys can influence expectations for consumer demand and inflation.",
+    "GOVERNMENT_FISCAL": "Government and Treasury events can occasionally affect the USD and yields.",
+    "TRADE": "Trade data has a limited, indirect bearing on the USD.",
+    "ENERGY": "Energy inventory data mainly concerns oil and gas and has little direct bearing on Gold."
   },
 
   "sources": {
@@ -51,31 +87,46 @@
     }
   },
 
-  "omit_line_if_missing": ["actual", "surprise_label", "attribution", "revision_note"],
+  "omit_line_if_missing": {
+    "default": ["actual", "surprise_label", "surprise_value", "result_sentence", "attribution", "revision_note", "why_it_matters"],
+    "MORNING_UPDATE": ["previous", "forecast", "actual", "why_it_matters"]
+  },
 
   "templates": {
     "MORNING_UPDATE": {
       "header": [
-        "📅 *USD + GOLD DAILY UPDATE*",
         "━━━━━━━━━━━━━━━━━━",
-        "📆 {weekday}, {date}",
+        "🇺🇸 *USD + GOLD MORNING BRIEF*",
+        "📅 {weekday}, {date}",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+        "📌 *KEY EVENTS*",
         ""
       ],
       "event": [
+        "{number} *{event_name}*",
         "📰 {headline_text}",
-        "{currency_flag} {display_time}",
-        "*{event_name}*",
-        "Impact: {impact_label}",
-        "Gold: {gold_label}",
-        "Priority: {priority_label}",
+        "{clock} {display_time}",
+        "📊 Impact: {impact_label}",
+        "🥇 Gold Relevance: {gold_label} · {gold_relevance_score}/100",
+        "🎯 Priority: {priority_label}",
         "Previous: {previous}",
         "Forecast: {forecast}",
-        "Actual: {actual}"
+        "Actual: {actual}",
+        "💡 {why_it_matters}"
       ],
-      "event_separator": ["", "┄┄┄┄┄┄┄┄┄", ""],
+      "event_separator": [""],
       "empty": ["No major USD / Gold events are scheduled for this day."],
       "footer": [
         "",
+        "━━━━━━━━━━━━━━━━━━",
+        "👀 *MARKET FOCUS*",
+        "",
+        "• Watch the USD reaction around each release.",
+        "• Watch Gold volatility if a figure differs materially from expectations.",
+        "• Higher-priority events deserve the most attention.",
+        "",
+        "⚠️ Gold relevance is this bot's monitoring assessment, not a prediction of price direction.",
         "━━━━━━━━━━━━━━━━━━",
         "Source: {source}"
       ]
@@ -83,22 +134,25 @@
 
     "HIGH_ALERT": {
       "body": [
-        "🚨 *HIGH IMPACT ALERT*",
+        "━━━━━━━━━━━━━━━━━━",
+        "🚨 *{alert_title}*",
         "━━━━━━━━━━━━━━━━━━",
         "",
+        "{currency_flag} *{event_name}*",
         "📰 {headline_text}",
         "",
-        "{currency_flag} *{event_name}*",
+        "{clock} {display_time} · {weekday}, {date}",
         "",
-        "⏰ {display_time}, {weekday} {date}",
-        "",
-        "Impact: {impact_label}",
-        "Gold: {gold_label}",
-        "Priority: {priority_label}",
+        "📊 Impact: {impact_label}",
+        "🥇 Gold Relevance: {gold_label} · {gold_relevance_score}/100",
+        "🎯 Priority: {priority_label} · {priority_score}/100",
         "",
         "Previous: {previous}",
         "Forecast: {forecast}",
         "",
+        "💡 *Why it matters:* {why_it_matters}",
+        "",
+        "⚠️ Gold relevance is this bot's monitoring assessment, not a prediction of price direction.",
         "━━━━━━━━━━━━━━━━━━",
         "Source: {source}"
       ]
@@ -106,22 +160,31 @@
 
     "ACTUAL_RESULT": {
       "body": [
-        "📊 *USD DATA RELEASED*",
+        "━━━━━━━━━━━━━━━━━━",
+        "🚨 *USD DATA RELEASED*",
         "━━━━━━━━━━━━━━━━━━",
         "",
-        "📰 {headline_text}",
-        "",
         "{currency_flag} *{event_name}*",
+        "📰 {headline_text}",
         "{revision_note}",
+        "",
+        "{clock} {display_time} · {weekday}, {date}",
+        "📊 Impact: {impact_label}",
+        "🥇 Gold Relevance: {gold_label} · {gold_relevance_score}/100",
+        "🎯 Priority: {priority_label} · {priority_score}/100",
         "",
         "Previous: {previous}",
         "Forecast: {forecast}",
         "Actual: *{actual}*",
         "",
-        "Result: {surprise_label}",
+        "*Result:* {surprise_label}",
+        "{surprise_value} vs forecast",
         "",
-        "Gold: {gold_label}",
-        "Priority: {priority_label}",
+        "━━━━━━━━━━━━━━━━━━",
+        "🎯 *MARKET FOCUS*",
+        "",
+        "{result_sentence}",
+        "Watch: USD reaction • Treasury yields • Gold volatility",
         "",
         "━━━━━━━━━━━━━━━━━━",
         "Source: {actual_source} (calendar: {source})",
@@ -131,22 +194,25 @@
 
     "UPCOMING_REMINDER": {
       "body": [
-        "⏰ *UPCOMING USD EVENT*",
+        "━━━━━━━━━━━━━━━━━━",
+        "⏳ *UPCOMING USD EVENT*",
         "━━━━━━━━━━━━━━━━━━",
         "",
+        "{currency_flag} *{event_name}*",
         "📰 {headline_text}",
         "",
-        "{currency_flag} *{event_name}*",
+        "{clock} {display_time} · {weekday}, {date}",
         "",
-        "Release: {display_time}, {weekday} {date}",
-        "",
-        "Impact: {impact_label}",
-        "Gold: {gold_label}",
-        "Priority: {priority_label}",
+        "📊 Impact: {impact_label}",
+        "🥇 Gold Relevance: {gold_label} · {gold_relevance_score}/100",
+        "🎯 Priority: {priority_label} · {priority_score}/100",
         "",
         "Previous: {previous}",
         "Forecast: {forecast}",
         "",
+        "💡 *Why it matters:* {why_it_matters}",
+        "",
+        "👀 Watch for: USD • Rates • Gold volatility",
         "━━━━━━━━━━━━━━━━━━",
         "Source: {source}"
       ]

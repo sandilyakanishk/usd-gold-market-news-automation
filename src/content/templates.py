@@ -13,9 +13,10 @@ from .models import ACTUAL_RESULT, HIGH_ALERT, MORNING_UPDATE, UPCOMING_REMINDER
 
 # Every name a template line may use for one event.
 EVENT_VARIABLES = (
-    "headline", "headline_text", "event_name", "currency", "currency_flag",
-    "date", "weekday", "time", "display_time",
-    "impact", "impact_label", "gold_relevance", "gold_relevance_level", "gold_label",
+    "headline", "headline_text", "event_name", "currency", "currency_flag", "number",
+    "date", "weekday", "time", "display_time", "clock",
+    "impact", "impact_label", "gold_relevance", "gold_relevance_level", "gold_label", "gold_relevance_score",
+    "why_it_matters", "alert_title", "result_sentence",
     "category", "category_label", "priority", "priority_label", "priority_score", "highlight_required",
     "forecast", "previous", "actual", "release_status", "actual_source", "actual_period", "actual_revision",
     "surprise_status", "surprise_label", "surprise_value", "revision_note",
@@ -78,6 +79,7 @@ class MessageTemplates:
         self.time_format, self.date_format = str(time["time_format"]), str(time["date_format"])
         self.day_month_format = str(time.get("day_month_format", "%d %b"))
         self.timezone_labels = dict(time.get("timezone_labels", {}))
+        self.strip_leading_zeros = bool(time.get("strip_leading_zeros", False))
 
         selection = config["selection"]
         self.daily_minimum_priority = self._priority(selection["daily_minimum_priority"], "daily_minimum_priority")
@@ -86,6 +88,9 @@ class MessageTemplates:
         self.alert_only_before_release = bool(selection.get("alert_only_before_release", True))
         self.upcoming_minimum_priority = self._priority(selection["upcoming_minimum_priority"], "upcoming_minimum_priority")
         self.upcoming_require_gold = bool(selection.get("upcoming_require_gold_relevance", True))
+        self.daily_order = str(selection.get("daily_order", "time"))
+        if self.daily_order not in ("time", "priority"):
+            raise TemplateConfigError("selection.daily_order must be 'time' or 'priority'.")
 
         labels = config["labels"]
         self.labels = {name: dict(labels[name]) for name in
@@ -95,6 +100,20 @@ class MessageTemplates:
             missing = [key for key in required if not str(self.labels[name].get(key, "")).strip()]
             if missing:
                 raise TemplateConfigError(f"labels.{name} has no text for: {', '.join(missing)}")
+        # Display-only scale for Gold relevance. It never feeds the Step 2 priority score.
+        scores = labels.get("gold_relevance_score", {})
+        self.gold_relevance_score = {}
+        for level in GOLD_LEVELS:
+            value = scores.get(level)
+            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 100:
+                raise TemplateConfigError(f"labels.gold_relevance_score.{level} must be a whole number from 0 to 100.")
+            self.gold_relevance_score[level] = value
+        self.alert_titles = dict(labels.get("alert_title", {}))
+        if not str(self.alert_titles.get("default", "")).strip():
+            raise TemplateConfigError("labels.alert_title needs a 'default' entry.")
+        self.result_sentences = dict(labels.get("result_sentence", {}))
+        self.numbers = [str(n) for n in labels.get("numbers", [])]
+        self.why_it_matters = {k: str(v) for k, v in config.get("why_it_matters", {}).items() if not k.startswith("_")}
         self.yes, self.no = str(labels.get("yes", "YES")), str(labels.get("no", "NO"))
         self.revision_note = str(labels.get("revision_note", ""))
         if set(_fields(self.revision_note)) - {"actual_revision"}:
@@ -104,10 +123,18 @@ class MessageTemplates:
         self.calendar_source = str(sources["calendar"])
         self.attribution = dict(sources.get("attribution", {}))
 
-        self.omit_if_missing = set(config.get("omit_line_if_missing", []))
-        unknown = self.omit_if_missing - set(EVENT_VARIABLES)
-        if unknown:
-            raise TemplateConfigError(f"omit_line_if_missing lists unknown name(s): {', '.join(sorted(unknown))}")
+        # Either one list for every message type, or {"default": [...], "<MESSAGE_TYPE>": [...]}.
+        omit = config.get("omit_line_if_missing", [])
+        per_type = omit if isinstance(omit, dict) else {"default": omit}
+        self._omit = {key: set(names) for key, names in per_type.items()}
+        self._omit.setdefault("default", set())
+        for key, names in self._omit.items():
+            if key != "default" and key not in _SECTIONS:
+                raise TemplateConfigError(f"omit_line_if_missing has an unknown message type: {key}")
+            unknown = names - set(EVENT_VARIABLES)
+            if unknown:
+                raise TemplateConfigError(f"omit_line_if_missing lists unknown name(s): {', '.join(sorted(unknown))}")
+        self.omit_if_missing = self._omit["default"]
 
         self._templates: dict[str, dict[str, list[str]]] = {}
         for message_type, sections in _SECTIONS.items():
@@ -151,9 +178,10 @@ class MessageTemplates:
     def render(self, message_type: str, section: str, values: dict[str, str | None]) -> str:
         """Fill one template section. `values` maps names to text, or None when the value is missing."""
         out = []
+        omit = self._omit.get(message_type, self._omit["default"])
         for line in self._templates[message_type][section]:
             used = _fields(line)
-            if any(name in self.omit_if_missing and values.get(name) is None for name in used):
+            if any(name in omit and values.get(name) is None for name in used):
                 continue
             filled = {name: (values.get(name) if values.get(name) is not None else self.missing) for name in used}
             out.append(line.format(**filled))

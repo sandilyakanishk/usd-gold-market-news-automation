@@ -140,7 +140,7 @@ def test_morning_dry_run_shows_the_real_message_and_sends_nothing(prepared, clie
     assert out.out.startswith("DRY RUN: nothing is sent and no delivery is recorded.\n\n"
                               "===== DAILY_UPDATE_2026-10-08 | MORNING_UPDATE =====\n"
                               "Destination: whatsapp_community_announcement (...8282@g.us) via whapi\n"
-                              "Would send:\n📅 *USD + GOLD DAILY UPDATE*")
+                              "Would send:\n━━━━━━━━━━━━━━━━━━\n🇺🇸 *USD + GOLD MORNING BRIEF*")
     step4_text = preview.out.split("=====\n", 1)[1].rstrip("\n")
     assert step4_text in out.out                       # exactly the Step 4 text
     assert client.sent == [] and deliveries(settings) == []
@@ -212,8 +212,8 @@ def test_alert_and_upcoming_send_when_events_qualify(prepared, client, tmp_path,
     assert code == 0
     assert out.out.count("Sent. Whapi message ID:") == 5
     sent_texts = [text for _, text in client.sent]
-    assert sent_texts[0].startswith("🚨 *HIGH IMPACT ALERT*") and "*FOMC Meeting Minutes*" in sent_texts[0]
-    assert all(text.startswith("⏰ *UPCOMING USD EVENT*") for text in sent_texts[1:])
+    assert "\n🚨 *HIGH-IMPACT USD ALERT*\n" in sent_texts[0] and "*FOMC Meeting Minutes*" in sent_texts[0]
+    assert all("\n⏳ *UPCOMING USD EVENT*\n" in text for text in sent_texts[1:])
     keys = sorted(r.message_key for r in deliveries(settings))
     assert sum(k.startswith("HIGH_ALERT_") for k in keys) == 1 and sum(k.startswith("UPCOMING_") for k in keys) == 4
     again = prepared("--whatsapp-send-alert", "--whatsapp-send-upcoming", message_templates_path=custom)[1].out
@@ -259,7 +259,7 @@ def test_sample_events_cannot_be_sent_for_real(prepared, client):
     code, out = prepared("--whatsapp-send-alert", "--fixture")
     assert code == 2 and "only be used with --dry-run" in out.err and client.sent == []
     code, out = prepared("--whatsapp-send-alert", "--fixture", "--dry-run")
-    assert code == 0 and "Would send:\n🚨 *HIGH IMPACT ALERT*" in out.out and client.sent == []
+    assert code == 0 and "Would send:\n━━━━━━━━━━━━━━━━━━\n🚨 *HIGH-IMPACT USD ALERT*" in out.out and client.sent == []
 
 
 def test_secrets_and_full_ids_never_appear_in_output(prepared, client, caplog):

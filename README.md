@@ -582,6 +582,7 @@ Selection uses the Step 2 classification (`priority`, `gold_relevance`,
 | --- | --- | --- |
 | `daily_minimum_priority` | `MEDIUM` | lowest priority shown in the daily update (so `LOW` is left out) |
 | `daily_require_gold_relevance` | `true` | daily update only lists Gold-relevant events |
+| `daily_order` | `priority` | order of events in the daily update: highest priority first, then strongest Gold relevance, then time. `time` gives plain chronological order. Each event still shows its own time; stored data is not reordered. |
 | `alert_requires_highlight` | `true` | alerts only for `highlight_required` events |
 | `alert_only_before_release` | `true` | no alert once the release time has passed |
 | `upcoming_minimum_priority` | `HIGH` | lowest priority that gets a reminder |
@@ -589,6 +590,44 @@ Selection uses the Step 2 classification (`priority`, `gold_relevance`,
 
 A result message is produced only for `RELEASED` events that have a stored
 Actual. `UPCOMING`, `NO_DATA` and `FAILED` events never get one.
+
+### Impact, Gold relevance and priority
+
+Every event block shows three separate things, each on its own line:
+
+| Line | Whose assessment | Example |
+| --- | --- | --- |
+| 📊 Impact | Forex Factory's, exactly as stored | 🟡 Medium |
+| 🥇 Gold Relevance | this bot's Step 2 level, plus a display number | 🟡 MODERATE · 65/100 |
+| 🎯 Priority | this bot's Step 2 priority and its score | 🟠 HIGH · 85/100 |
+
+**The Gold relevance number.** It is a fixed, display-only translation of the
+Step 2 level:
+
+| Level | Shown as |
+| --- | --- |
+| `STRONG` | 100/100 |
+| `MODERATE` | 65/100 |
+| `WEAK` | 30/100 |
+| `NONE` | 0/100 |
+
+It represents the relevance of the event to the bot's Gold/XAUUSD monitoring
+framework. It is **not** a probability, not a likelihood that Gold rises or
+falls, not an expected price move and not a prediction of direction. It is set
+in `labels.gold_relevance_score`, is used only when text is generated, is not
+stored, and has no effect on the Step 2 priority score, the priority, or
+which events are selected.
+
+**Why it matters.** One sentence per Step 2 category, from the
+`why_it_matters` part of the template file (for example, for `INFLATION`:
+"Inflation data can shift rate expectations and USD and yield pricing, making
+it relevant to Gold."). It explains why an event is watched and never states
+a direction. An event whose category has no sentence shows the Step 2
+relevance reason instead.
+
+**Alert title.** The alert is headed "HIGH-IMPACT USD ALERT" only when Forex
+Factory rates the event High; a highlighted event with a lower rating is
+headed "PRIORITY USD ALERT" (`labels.alert_title`).
 
 ### Headlines
 
@@ -629,14 +668,18 @@ Variables for one event:
 | `{headline}`, `{headline_text}` | with and without the leading emoji |
 | `{event_name}` | `CPI m/m` (exact Forex Factory name) |
 | `{currency}`, `{currency_flag}` | `USD`, 🇺🇸 |
-| `{date}`, `{weekday}`, `{time}`, `{display_time}` | `12 Nov 2026`, `Thursday`, `19:00`, `07:00 PM IST` |
-| `{impact}`, `{impact_label}` | `High`, 🔴 HIGH |
-| `{gold_relevance}`, `{gold_relevance_level}`, `{gold_label}` | `YES`, `STRONG`, 🟢 STRONG |
+| `{number}` | 1️⃣, 2️⃣ ... the event's position in the daily update |
+| `{date}`, `{weekday}`, `{time}`, `{display_time}`, `{clock}` | `12 November 2026`, `Thursday`, `19:00`, `7:00 PM IST`, 🕖 |
+| `{impact}`, `{impact_label}` | `High`, 🔴 High |
+| `{gold_relevance}`, `{gold_relevance_level}`, `{gold_label}`, `{gold_relevance_score}` | `YES`, `STRONG`, 🟢 STRONG, `100` |
+| `{why_it_matters}` | the category's explanation |
+| `{alert_title}` | `HIGH-IMPACT USD ALERT` |
+| `{result_sentence}` | "The figure came in above the forecast." |
 | `{category}`, `{category_label}` | `FED_COMMUNICATION`, `FED COMMUNICATION` |
 | `{priority}`, `{priority_label}`, `{priority_score}`, `{highlight_required}` | `CRITICAL`, 🔴 CRITICAL, `100`, `YES` |
 | `{forecast}`, `{previous}`, `{actual}` | as stored, for example `0.3%`, `197K`, `4.00%` |
 | `{release_status}`, `{actual_source}`, `{actual_period}`, `{actual_revision}` | `RELEASED`, `BLS`, `2026-10`, `1` |
-| `{surprise_status}`, `{surprise_label}`, `{surprise_value}` | `ABOVE FORECAST`, 🔺 ABOVE FORECAST, `+35K` |
+| `{surprise_status}`, `{surprise_label}`, `{surprise_value}` | `ABOVE FORECAST`, 📈 ABOVE FORECAST, `+35K` |
 | `{revision_note}` | "Revised figure (revision 2)", only for a revised Actual |
 | `{classification_reason}`, `{gold_relevance_reason}` | the Step 2 explanations |
 | `{source}`, `{attribution}` | `Forex Factory`; a source's required notice |
@@ -645,12 +688,15 @@ The header, footer and empty-day text of the daily update can use `{date}`,
 `{weekday}`, `{event_count}` and `{source}`. An unknown variable is rejected
 when the file is loaded.
 
-**Missing values.** A value that does not exist is printed as `-` (the
+**Missing values.** A value that does not exist is printed as `—` (the
 `missing_value` setting), never as `None` or `null`, and is never made up.
 Lines that use a variable listed in `omit_line_if_missing` are dropped
-instead: by default the `Actual:` line of the daily update before a release,
-the `Result:` line when there is no forecast to compare with, the revision
-note and the attribution line.
+instead. That setting has a `default` list and can have a list per message
+type. By default the result lines are dropped when there is no forecast to
+compare with, as are the revision note and the attribution line when they do
+not apply; in the daily update the `Previous`, `Forecast` and `Actual` lines
+are dropped when empty, to keep it short, while the alert, result and
+reminder messages show `—`.
 
 **Numbers.** Values are shown exactly as stored. The content engine does not
 convert, round or re-unit anything. The one conversion in the system happens
@@ -658,8 +704,16 @@ earlier, in Step 3, where a mapping states it explicitly (for example jobless
 claims published as 218000 are stored as `218K`).
 
 **Time.** Times are shown in `DISPLAY_TIMEZONE` (India time by default) as
-`07:00 PM IST`, computed from the stored UTC instant, which is not changed.
-The format and the zone label are in the `time` part of the template file.
+`7:00 PM IST`. The path is: the feed's timestamp with its own UTC offset, to
+the stored UTC instant, to an explicit conversion into `Asia/Kolkata` when
+the text is built. There is exactly one conversion, from the UTC instant; the
+machine's own timezone is never consulted, so a cloud runner in UTC prints
+the same times as a computer in India. US daylight saving is handled by the
+feed's offset: an 08:30 New York release shows as 6:00 PM IST in US summer
+time and 7:00 PM IST in US winter time. The date printed is India's calendar
+date, so an event at 18:30 UTC appears under the next day. The daily update's
+own date is today in India, not the UTC date. The format, the zone label and
+`strip_leading_zeros` are in the `time` part of the template file.
 
 **Formatting.** Only `*bold*` and `_italic_` are used, which Telegram and
 WhatsApp read the same way, and the text stays understandable with the

@@ -50,41 +50,51 @@ def custom_builder(template_config, sample, mutate):
 def test_morning_update_text(sample):
     items, _, builder = sample
     message = builder.morning_update(items, DAY)
-    assert message.text == """📅 *USD + GOLD DAILY UPDATE*
+    assert message.text == """━━━━━━━━━━━━━━━━━━
+🇺🇸 *USD + GOLD MORNING BRIEF*
+📅 Thursday, 12 November 2026
 ━━━━━━━━━━━━━━━━━━
-📆 Thursday, 12 Nov 2026
 
+📌 *KEY EVENTS*
+
+1️⃣ *CPI m/m*
 📰 US CPI inflation data due today
-🇺🇸 07:00 PM IST
-*CPI m/m*
-Impact: 🔴 HIGH
-Gold: 🟢 STRONG
-Priority: 🔴 CRITICAL
+🕖 7:00 PM IST
+📊 Impact: 🔴 High
+🥇 Gold Relevance: 🟢 STRONG · 100/100
+🎯 Priority: 🔴 CRITICAL
 Previous: 0.4%
 Forecast: 0.3%
+💡 Inflation data can shift rate expectations and USD and yield pricing, making it relevant to Gold.
 
-┄┄┄┄┄┄┄┄┄
-
+2️⃣ *Core CPI m/m*
 📰 US core CPI inflation data due today
-🇺🇸 07:00 PM IST
-*Core CPI m/m*
-Impact: 🔴 HIGH
-Gold: 🟢 STRONG
-Priority: 🔴 CRITICAL
+🕖 7:00 PM IST
+📊 Impact: 🔴 High
+🥇 Gold Relevance: 🟢 STRONG · 100/100
+🎯 Priority: 🔴 CRITICAL
 Previous: 0.3%
 Forecast: 0.3%
+💡 Inflation data can shift rate expectations and USD and yield pricing, making it relevant to Gold.
 
-┄┄┄┄┄┄┄┄┄
-
+3️⃣ *Unemployment Claims*
 📰 US weekly jobless claims due today
-🇺🇸 07:00 PM IST
-*Unemployment Claims*
-Impact: 🟠 MEDIUM
-Gold: 🟡 MODERATE
-Priority: 🟡 MEDIUM
+🕖 7:00 PM IST
+📊 Impact: 🟡 Medium
+🥇 Gold Relevance: 🟡 MODERATE · 65/100
+🎯 Priority: 🟡 MEDIUM
 Previous: 218K
 Forecast: 220K
+💡 Labour-market data can influence Fed expectations, the USD and Treasury yields.
 
+━━━━━━━━━━━━━━━━━━
+👀 *MARKET FOCUS*
+
+• Watch the USD reaction around each release.
+• Watch Gold volatility if a figure differs materially from expectations.
+• Higher-priority events deserve the most attention.
+
+⚠️ Gold relevance is this bot's monitoring assessment, not a prediction of price direction.
 ━━━━━━━━━━━━━━━━━━
 Source: Forex Factory"""
     assert (message.message_key, message.message_type) == ("DAILY_UPDATE_2026-11-12", "MORNING_UPDATE")
@@ -127,12 +137,23 @@ def test_selection_uses_the_classification_not_the_step_1_keyword_flag(sample):
 def test_morning_update_on_a_day_without_events(sample):
     items, _, builder = sample
     message = builder.morning_update(items, date(2026, 11, 15))
-    assert message.text == """📅 *USD + GOLD DAILY UPDATE*
+    assert message.text == """━━━━━━━━━━━━━━━━━━
+🇺🇸 *USD + GOLD MORNING BRIEF*
+📅 Sunday, 15 November 2026
 ━━━━━━━━━━━━━━━━━━
-📆 Sunday, 15 Nov 2026
+
+📌 *KEY EVENTS*
 
 No major USD / Gold events are scheduled for this day.
 
+━━━━━━━━━━━━━━━━━━
+👀 *MARKET FOCUS*
+
+• Watch the USD reaction around each release.
+• Watch Gold volatility if a figure differs materially from expectations.
+• Higher-priority events deserve the most attention.
+
+⚠️ Gold relevance is this bot's monitoring assessment, not a prediction of price direction.
 ━━━━━━━━━━━━━━━━━━
 Source: Forex Factory"""
     assert (message.events, message.priority, message.highlight_required) == ([], None, False)
@@ -159,22 +180,25 @@ def test_unclassified_events_are_not_selected(sample):
 def test_high_alert_text(sample):
     items, _, builder = sample
     message = next(m for m in builder.high_alerts(items) if m.event_name == "CPI m/m")
-    assert message.text == """🚨 *HIGH IMPACT ALERT*
+    assert message.text == """━━━━━━━━━━━━━━━━━━
+🚨 *HIGH-IMPACT USD ALERT*
 ━━━━━━━━━━━━━━━━━━
 
+🇺🇸 *CPI m/m*
 📰 US CPI inflation data due today
 
-🇺🇸 *CPI m/m*
+🕖 7:00 PM IST · Thursday, 12 November 2026
 
-⏰ 07:00 PM IST, Thursday 12 Nov 2026
-
-Impact: 🔴 HIGH
-Gold: 🟢 STRONG
-Priority: 🔴 CRITICAL
+📊 Impact: 🔴 High
+🥇 Gold Relevance: 🟢 STRONG · 100/100
+🎯 Priority: 🔴 CRITICAL · 100/100
 
 Previous: 0.4%
 Forecast: 0.3%
 
+💡 *Why it matters:* Inflation data can shift rate expectations and USD and yield pricing, making it relevant to Gold.
+
+⚠️ Gold relevance is this bot's monitoring assessment, not a prediction of price direction.
 ━━━━━━━━━━━━━━━━━━
 Source: Forex Factory"""
     upcoming_cpi = pick(items, "CPI m/m", released=False)
@@ -204,8 +228,9 @@ def test_high_minutes_alert_shows_missing_values_cleanly(sample):
     message = next(m for m in builder.high_alerts(items) if m.event_name == "FOMC Meeting Minutes")
     assert "📰 Fed meeting minutes due on 19 Nov" in message.text
     assert "🇺🇸 *FOMC Meeting Minutes*" in message.text
-    assert "Previous: -\nForecast: -" in message.text
-    assert "Priority: 🟠 HIGH" in message.text
+    assert "Previous: —\nForecast: —" in message.text
+    assert "🎯 Priority: 🟠 HIGH · 85/100" in message.text
+    assert "🥇 Gold Relevance: 🟢 STRONG · 100/100" in message.text and "📊 Impact: 🔴 High" in message.text
 
 
 # -- actual result -------------------------------------------------------------------
@@ -214,21 +239,30 @@ def test_actual_result_text_bls(sample):
     items, _, builder = sample
     item = pick(items, "CPI m/m", released=True)
     (message,) = [m for m in builder.actual_results(items) if m.event_id == item.event.event_id]
-    assert message.text == """📊 *USD DATA RELEASED*
+    assert message.text == """━━━━━━━━━━━━━━━━━━
+🚨 *USD DATA RELEASED*
 ━━━━━━━━━━━━━━━━━━
 
+🇺🇸 *CPI m/m*
 📰 US CPI comes in above expectations
 
-🇺🇸 *CPI m/m*
+🕕 6:00 PM IST · Wednesday, 14 October 2026
+📊 Impact: 🔴 High
+🥇 Gold Relevance: 🟢 STRONG · 100/100
+🎯 Priority: 🔴 CRITICAL · 100/100
 
 Previous: 0.4%
 Forecast: 0.3%
 Actual: *0.5%*
 
-Result: 🔺 ABOVE FORECAST
+*Result:* 📈 ABOVE FORECAST
++0.2 pts vs forecast
 
-Gold: 🟢 STRONG
-Priority: 🔴 CRITICAL
+━━━━━━━━━━━━━━━━━━
+🎯 *MARKET FOCUS*
+
+The figure came in above the forecast.
+Watch: USD reaction • Treasury yields • Gold volatility
 
 ━━━━━━━━━━━━━━━━━━
 Source: BLS (calendar: Forex Factory)"""
@@ -238,12 +272,12 @@ Source: BLS (calendar: Forex Factory)"""
 
 
 @pytest.mark.parametrize("name, headline, result", [
-    ("CPI m/m", "🇺🇸 US CPI comes in above expectations", "Result: 🔺 ABOVE FORECAST"),
-    ("CPI y/y", "🇺🇸 US CPI comes in below expectations", "Result: 🔻 BELOW FORECAST"),
-    ("Core CPI m/m", "🇺🇸 US core CPI in line with expectations", "Result: ➖ IN LINE WITH FORECAST"),
-    ("Non-Farm Employment Change", "🇺🇸 US non-farm payrolls come in above expectations", "Result: 🔺 ABOVE FORECAST"),
-    ("Unemployment Rate", "🇺🇸 US unemployment rate comes in below expectations", "Result: 🔻 BELOW FORECAST"),
-    ("Average Hourly Earnings m/m", "🇺🇸 US average hourly earnings in line with expectations", "Result: ➖ IN LINE WITH FORECAST"),
+    ("CPI m/m", "🇺🇸 US CPI comes in above expectations", "*Result:* 📈 ABOVE FORECAST"),
+    ("CPI y/y", "🇺🇸 US CPI comes in below expectations", "*Result:* 📉 BELOW FORECAST"),
+    ("Core CPI m/m", "🇺🇸 US core CPI in line with expectations", "*Result:* ➖ IN LINE WITH FORECAST"),
+    ("Non-Farm Employment Change", "🇺🇸 US non-farm payrolls come in above expectations", "*Result:* 📈 ABOVE FORECAST"),
+    ("Unemployment Rate", "🇺🇸 US unemployment rate comes in below expectations", "*Result:* 📉 BELOW FORECAST"),
+    ("Average Hourly Earnings m/m", "🇺🇸 US average hourly earnings in line with expectations", "*Result:* ➖ IN LINE WITH FORECAST"),
 ])
 def test_result_wording_for_above_below_and_in_line(sample, name, headline, result):
     items, _, builder = sample
@@ -268,8 +302,9 @@ def test_no_comparison_is_invented_without_a_forecast(sample):
     items, _, builder = sample
     item = pick(items, "Core Retail Sales m/m")
     (message,) = [m for m in builder.actual_results(items) if m.event_id == item.event.event_id]
-    assert "Result:" not in message.text and "FORECAST" not in message.text.replace("Forecast:", "")
-    assert "Forecast: -\nActual: *0.4%*" in message.text
+    assert "Result:" not in message.text and "FORECAST" not in message.text and "vs forecast" not in message.text
+    assert "The figure" not in message.text                      # no result sentence either
+    assert "Forecast: —\nActual: *0.4%*" in message.text
     assert message.headline == "🇺🇸 US core retail sales released"
     assert "\n\n\n" not in message.text  # the dropped line leaves no gap
 
@@ -279,8 +314,8 @@ def test_revised_figure_gets_its_own_key_and_note(sample):
     item = pick(items, "PPI m/m")
     (message,) = [m for m in builder.actual_results(items) if m.event_id == item.event.event_id]
     assert message.message_key == f"ACTUAL_{item.event.event_id}_2"
-    assert "🇺🇸 *PPI m/m*\nRevised figure (revision 2)" in message.text
-    assert "Previous: -" in message.text  # missing previous
+    assert "🇺🇸 *PPI m/m*\n📰 US PPI comes in below expectations\n♻️ Revised figure (revision 2)" in message.text
+    assert "Previous: —" in message.text  # missing previous
     first = replace(item, record=replace(item.record, actual_revision=1))
     (original,) = builder.actual_results([first])
     assert original.message_key == f"ACTUAL_{item.event.event_id}_1" and "Revised" not in original.text
@@ -292,7 +327,8 @@ def test_fed_decision_result(sample):
     (message,) = [m for m in builder.actual_results(items) if m.event_id == item.event.event_id]
     assert message.headline == "🚨 Fed cuts interest rates to 4.00%"   # 4.25% -> 4.00%
     assert "📰 Fed cuts interest rates to 4.00%" in message.text and "🇺🇸 *Federal Funds Rate*" in message.text
-    assert "Result: ➖ IN LINE WITH FORECAST" in message.text           # against the 4.00% forecast
+    assert "*Result:* ➖ IN LINE WITH FORECAST" in message.text         # against the 4.00% forecast
+    assert "The figure matched the forecast." in message.text
 
 
 def test_actual_messages_only_for_released_events(sample):
@@ -315,22 +351,25 @@ def test_actual_messages_only_for_released_events(sample):
 def test_upcoming_reminder_text(sample):
     items, _, builder = sample
     message = next(m for m in builder.upcoming_reminders(items) if m.event_name == "Federal Funds Rate")
-    assert message.text == """⏰ *UPCOMING USD EVENT*
+    assert message.text == """━━━━━━━━━━━━━━━━━━
+⏳ *UPCOMING USD EVENT*
 ━━━━━━━━━━━━━━━━━━
 
+🇺🇸 *Federal Funds Rate*
 📰 Fed interest-rate decision due on 14 Nov
 
-🇺🇸 *Federal Funds Rate*
+🕧 12:30 AM IST · Saturday, 14 November 2026
 
-Release: 12:30 AM IST, Saturday 14 Nov 2026
-
-Impact: 🔴 HIGH
-Gold: 🟢 STRONG
-Priority: 🔴 CRITICAL
+📊 Impact: 🔴 High
+🥇 Gold Relevance: 🟢 STRONG · 100/100
+🎯 Priority: 🔴 CRITICAL · 100/100
 
 Previous: 4.00%
 Forecast: 4.00%
 
+💡 *Why it matters:* Fed policy decisions can shift interest-rate expectations and the USD, both of which Gold is sensitive to.
+
+👀 Watch for: USD • Rates • Gold volatility
 ━━━━━━━━━━━━━━━━━━
 Source: Forex Factory"""
     assert message.message_key.startswith("UPCOMING_ff-") and message.message_type == "UPCOMING_REMINDER"
@@ -396,25 +435,29 @@ def test_values_of_a_released_event(sample):
     v = builder.variables(pick(items, "Non-Farm Employment Change"))
     expected = {
         "event_name": "Non-Farm Employment Change", "currency": "USD", "currency_flag": "🇺🇸",
-        "date": "06 Nov 2026", "weekday": "Friday", "time": "19:00", "display_time": "07:00 PM IST",
-        "impact": "High", "impact_label": "🔴 HIGH", "gold_relevance": "YES", "gold_relevance_level": "STRONG",
+        "date": "6 November 2026", "weekday": "Friday", "time": "19:00", "display_time": "7:00 PM IST", "clock": "🕖",
+        "impact": "High", "impact_label": "🔴 High", "gold_relevance": "YES", "gold_relevance_level": "STRONG",
+        "gold_relevance_score": "100", "alert_title": "HIGH-IMPACT USD ALERT",
+        "why_it_matters": "Labour-market data can influence Fed expectations, the USD and Treasury yields.",
+        "result_sentence": "The figure came in above the forecast.",
         "gold_label": "🟢 STRONG", "category": "EMPLOYMENT", "category_label": "EMPLOYMENT", "priority": "CRITICAL",
         "priority_label": "🔴 CRITICAL", "priority_score": "100", "highlight_required": "YES",
         "forecast": "50K", "previous": "29K", "actual": "85K", "release_status": "RELEASED", "actual_source": "BLS",
         "actual_period": "2026-10", "actual_revision": "1", "surprise_status": "ABOVE FORECAST",
-        "surprise_label": "🔺 ABOVE FORECAST", "surprise_value": "+35K", "source": "Forex Factory",
+        "surprise_label": "📈 ABOVE FORECAST", "surprise_value": "+35K", "source": "Forex Factory",
         "headline": "🇺🇸 US non-farm payrolls come in above expectations",
         "headline_text": "US non-farm payrolls come in above expectations",
     }
     assert {k: v[k] for k in expected} == expected
-    assert v["revision_note"] is None and v["attribution"] is None
+    assert v["revision_note"] is None and v["attribution"] is None and v["number"] is None
 
 
 def test_values_of_an_upcoming_event_are_missing_not_invented(sample):
     items, _, builder = sample
     v = builder.variables(pick(items, "FOMC Meeting Minutes"))
     for name in ("forecast", "previous", "actual", "actual_source", "actual_period", "actual_revision",
-                 "surprise_status", "surprise_label", "surprise_value", "attribution", "revision_note"):
+                 "surprise_status", "surprise_label", "surprise_value", "attribution", "revision_note",
+                 "result_sentence", "number"):
         assert v[name] is None, name
     assert (v["release_status"], v["category_label"]) == ("UPCOMING", "FED COMMUNICATION")
 
@@ -448,16 +491,16 @@ def test_times_are_india_time_and_the_stored_instant_is_untouched(settings, samp
     items, now, builder = sample
     cpi = pick(items, "CPI m/m", released=False)
     assert cpi.event.datetime_utc == "2026-11-12T13:30:00Z"
-    assert builder.variables(cpi)["display_time"] == "07:00 PM IST"
+    assert builder.variables(cpi)["display_time"] == "7:00 PM IST"
     assert cpi.event.datetime_utc == "2026-11-12T13:30:00Z"
     # 19:00 UTC on the 13th is already the 14th in India: the date shown follows India time.
     fed = builder.variables(pick(items, "Federal Funds Rate", released=False))
-    assert (fed["display_time"], fed["date"], fed["weekday"]) == ("12:30 AM IST", "14 Nov 2026", "Saturday")
+    assert (fed["display_time"], fed["date"], fed["weekday"]) == ("12:30 AM IST", "14 November 2026", "Saturday")
     # The display timezone is configuration; the instant is the same.
     utc = build_content_builder(replace(settings, display_timezone=None), now)
-    assert utc.variables(cpi)["display_time"] == "01:30 PM UTC"
+    assert utc.variables(cpi)["display_time"] == "1:30 PM UTC"
     new_york = build_content_builder(replace(settings, display_timezone="America/New_York"), now)
-    assert new_york.variables(cpi)["display_time"] == "08:30 AM EST"
+    assert new_york.variables(cpi)["display_time"] == "8:30 AM EST"
 
 
 def test_time_format_is_configurable(template_config, sample):
@@ -501,11 +544,12 @@ def test_messages_are_markdown_safe_and_plain_enough_for_whatsapp(sample):
         assert m.markdown_safe and markdown_safe(m.text)
         for forbidden in ("`", "[", "](", "<b>", "</", "__", "**", "~~", "||", "#"):
             assert forbidden not in m.text, (m.message_key, forbidden)
-        assert max(len(line) for line in m.text.splitlines()) <= 120
+        assert max(len(line) for line in m.text.splitlines()) <= 140
         # Meaning never depends on the markers: without them the text still reads the same.
         plain = m.text.replace("*", "").replace("_", "")
-        assert (m.event_name or "USD + GOLD DAILY UPDATE") in plain
-    assert len(messages[0].text) < 1000  # the daily update stays short enough for a phone
+        assert (m.event_name or "USD + GOLD MORNING BRIEF") in plain
+    assert len(messages[0].text) < 1600  # three events with their context still fit comfortably on a phone
+    assert all(len(m.text) < 1300 for m in messages[1:])
 
 
 def test_a_value_that_would_break_markdown_is_flagged_not_altered(sample):
@@ -522,9 +566,14 @@ def test_no_trading_language_anywhere(sample, template_config):
     items, _, builder = sample
     text = "\n".join(m.text for m in [builder.morning_update(items, DAY)] + builder.high_alerts(items)
                      + builder.actual_results(items) + builder.upcoming_reminders(items)).casefold()
-    text += json.dumps(template_config, ensure_ascii=False).casefold().replace("no trade direction", "")
+    # The explanatory notes in the file say what the wording must NOT be; they are not message text.
+    message_config = {k: v for k, v in template_config.items() if k != "_about"}
+    message_config["labels"] = {k: v for k, v in template_config["labels"].items()}
+    message_config["labels"]["gold_relevance_score"] = {k: v for k, v in template_config["labels"]["gold_relevance_score"].items() if k != "_about"}
+    text += json.dumps(message_config, ensure_ascii=False).casefold().replace("not a prediction of price direction", "")
     for word in ["bullish", "bearish", "buy", "sell", "long gold", "short gold", "will rise", "will fall",
-                 "guaranteed", "explode", "target price", "stop loss", "trade"]:
+                 "guaranteed", "explode", "target price", "stop loss", "take profit", "entry point", "trading signal",
+                 "chance", "probab", "likelihood", "expected move", "will move", "% of"]:
         assert word not in text, word
 
 
@@ -541,7 +590,7 @@ def test_templates_can_be_edited_without_touching_python(template_config, sample
 
     b = custom_builder(template_config, sample, edit)
     message = next(m for m in b.high_alerts(items) if m.event_name == "CPI m/m")
-    assert message.text == ("ALERT: 🇺🇸 US CPI inflation data due today\nCPI m/m at 07:00 PM IST (INFLATION)\n"
+    assert message.text == ("ALERT: 🇺🇸 US CPI inflation data due today\nCPI m/m at 7:00 PM IST (INFLATION)\n"
                             "Score 100 | YES | Priority CRITICAL: score 100/100 = Forex Factory impact High (30) "
                             "+ Gold relevance STRONG (40) + critical event (30).")
     minutes = next(m for m in b.upcoming_reminders(items) if m.event_name == "FOMC Meeting Minutes")
@@ -590,5 +639,6 @@ def test_unreadable_template_file(tmp_path):
 
 def test_shipped_configuration_loads():
     templates = MessageTemplates.from_file(TEMPLATES_PATH)
-    assert (templates.daily_minimum_priority, templates.upcoming_minimum_priority, templates.missing) == ("MEDIUM", "HIGH", "-")
+    assert (templates.daily_minimum_priority, templates.upcoming_minimum_priority, templates.missing) == ("MEDIUM", "HIGH", "—")
+    assert (templates.version, templates.daily_order, templates.strip_leading_zeros) == ("2.0.0", "priority", True)
     assert HeadlineRules.from_file(PROJECT_ROOT / "config" / "headline_rules.json").version == "1.0.0"

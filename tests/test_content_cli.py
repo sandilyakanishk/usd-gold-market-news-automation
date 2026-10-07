@@ -61,30 +61,39 @@ def test_morning_preview_from_the_database(prepared):
     code, out = prepared("--preview-morning")
     assert code == 0
     assert out.out == """===== DAILY_UPDATE_2026-10-08 | MORNING_UPDATE =====
-📅 *USD + GOLD DAILY UPDATE*
 ━━━━━━━━━━━━━━━━━━
-📆 Thursday, 08 Oct 2026
+🇺🇸 *USD + GOLD MORNING BRIEF*
+📅 Thursday, 8 October 2026
+━━━━━━━━━━━━━━━━━━
 
+📌 *KEY EVENTS*
+
+1️⃣ *FOMC Member Waller Speaks*
 📰 Fed official Waller due to speak today
-🇺🇸 02:00 PM IST
-*FOMC Member Waller Speaks*
-Impact: 🟠 MEDIUM
-Gold: 🟡 MODERATE
-Priority: 🟡 MEDIUM
-Previous: -
-Forecast: -
+🕑 2:00 PM IST
+📊 Impact: 🟡 Medium
+🥇 Gold Relevance: 🟡 MODERATE · 65/100
+🎯 Priority: 🟡 MEDIUM
+💡 Fed communication can influence rate expectations, the USD and Gold.
 
-┄┄┄┄┄┄┄┄┄
-
+2️⃣ *Unemployment Claims*
 📰 US weekly jobless claims due today
-🇺🇸 06:00 PM IST
-*Unemployment Claims*
-Impact: 🟠 MEDIUM
-Gold: 🟡 MODERATE
-Priority: 🟡 MEDIUM
+🕕 6:00 PM IST
+📊 Impact: 🟡 Medium
+🥇 Gold Relevance: 🟡 MODERATE · 65/100
+🎯 Priority: 🟡 MEDIUM
 Previous: 197K
 Forecast: 200K
+💡 Labour-market data can influence Fed expectations, the USD and Treasury yields.
 
+━━━━━━━━━━━━━━━━━━
+👀 *MARKET FOCUS*
+
+• Watch the USD reaction around each release.
+• Watch Gold volatility if a figure differs materially from expectations.
+• Higher-priority events deserve the most attention.
+
+⚠️ Gold relevance is this bot's monitoring assessment, not a prediction of price direction.
 ━━━━━━━━━━━━━━━━━━
 Source: Forex Factory
 """
@@ -116,7 +125,7 @@ def test_actual_preview_appears_once_the_figure_is_released(prepared):
     (message,) = json.loads(out.out)
     assert message["message_type"] == "ACTUAL_RESULT" and message["message_key"] == f"ACTUAL_{message['event_id']}_1"
     assert (message["event_name"], message["headline"]) == ("Unemployment Claims", "🇺🇸 US weekly jobless claims come in above expectations")
-    assert "Actual: *218K*" in message["text"] and "Result: 🔺 ABOVE FORECAST" in message["text"]
+    assert "Actual: *218K*" in message["text"] and "*Result:* 📈 ABOVE FORECAST\n+18K vs forecast" in message["text"]
     assert "Source: FRED (calendar: Forex Factory)" in message["text"]
     assert message["attribution"].startswith("This product uses the FRED® API")
     # The same event in the daily update now carries the figure and the new headline.
@@ -158,8 +167,8 @@ def test_fixture_previews(run, settings, flag, count, first_key_prefix):
 def test_fixture_text_output_is_labelled_as_sample_data(run):
     _, out = run("--preview-alert", "--fixture")
     assert out.out.startswith("SAMPLE DATA: these messages are built from bundled sample events, not from the database.")
-    assert "===== HIGH_ALERT_ff-" in out.out and "🚨 *HIGH IMPACT ALERT*" in out.out
-    assert "📰 US CPI inflation data due today" in out.out and "🇺🇸 *CPI m/m*" in out.out
+    assert "===== HIGH_ALERT_ff-" in out.out and "🚨 *HIGH-IMPACT USD ALERT*" in out.out
+    assert "🇺🇸 *CPI m/m*\n📰 US CPI inflation data due today" in out.out
 
 
 def test_previews_are_read_only(prepared, settings, sources):

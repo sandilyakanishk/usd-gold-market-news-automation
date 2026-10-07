@@ -139,7 +139,7 @@ def test_headlines_before_and_after(pipeline):
     after = {m.event_name: m.headline for m in pipeline["messages_after"]}
     assert before == {
         "CPI m/m": "🇺🇸 US CPI inflation data due on 14 Oct",
-        "FOMC Meeting Minutes": "🇺🇸 Fed meeting minutes due on 07 Oct",
+        "FOMC Meeting Minutes": "🇺🇸 Fed meeting minutes due on 7 Oct",
         "Federal Funds Rate": "🚨 Fed interest-rate decision due on 28 Oct",
         "Non-Farm Employment Change": "🇺🇸 US non-farm payrolls report due tomorrow",
         "Retail Sales m/m": "🇺🇸 US retail sales data due on 16 Oct",
