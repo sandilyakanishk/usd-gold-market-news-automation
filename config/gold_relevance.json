@@ -1,0 +1,33 @@
+{
+  "_comment": "Gold/XAUUSD relevance rules. An event is gold-relevant when its currency is listed in 'currencies' AND its Forex Factory event name contains one of 'keywords' (case-insensitive, whole word/phrase) AND none of 'exclude_keywords'. This is independent of Forex Factory's own impact rating. Edit freely; changes apply on the next run.",
+  "currencies": ["USD"],
+  "keywords": [
+    "Non-Farm",
+    "ADP",
+    "Unemployment Rate",
+    "Unemployment Claims",
+    "Jobless Claims",
+    "Average Hourly Earnings",
+    "Employment Cost Index",
+    "JOLTS",
+    "CPI",
+    "PPI",
+    "PCE",
+    "GDP",
+    "Inflation Expectations",
+    "FOMC",
+    "Federal Funds Rate",
+    "Fed",
+    "Federal Reserve",
+    "Jackson Hole",
+    "Retail Sales",
+    "ISM",
+    "PMI",
+    "Consumer Confidence",
+    "Consumer Sentiment",
+    "Durable Goods",
+    "Home Sales",
+    "Industrial Production"
+  ],
+  "exclude_keywords": []
+}

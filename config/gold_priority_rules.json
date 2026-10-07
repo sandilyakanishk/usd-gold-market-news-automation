@@ -1,0 +1,231 @@
+{
+  "_about": [
+    "Editorial event-priority rules for USD events and Gold/XAUUSD. NOT a trading signal and NOT financial advice.",
+    "Event names are Forex Factory's own. Matching is case-insensitive and must cover the WHOLE name.",
+    "Wildcards: * = any text (including none), ? = exactly one character. Example: 'CPI ?/?' matches 'CPI m/m' and 'CPI y/y' but not 'Core CPI m/m'.",
+    "Order of evaluation: exclusions, then strong, moderate, weak. The first match wins. Anything unmatched uses 'default'.",
+    "After editing, raise classification_version and run: python -m src.main --classify"
+  ],
+
+  "classification_version": "1.0.0",
+
+  "currencies": ["USD"],
+
+  "categories": [
+    "MONETARY_POLICY", "FED_COMMUNICATION", "INFLATION", "EMPLOYMENT", "GROWTH",
+    "CONSUMER_ACTIVITY", "BUSINESS_ACTIVITY", "MANUFACTURING", "SERVICES", "HOUSING",
+    "TRADE", "ENERGY", "GOVERNMENT_FISCAL", "SENTIMENT", "OTHER"
+  ],
+
+  "default": {
+    "category": "OTHER",
+    "reason": "No classification rule matches this event name; treated as not Gold-relevant until a rule is added."
+  },
+
+  "exclusions": [
+    {
+      "category": "GROWTH",
+      "reason": "Model-based estimate published by a regional Federal Reserve bank, not an official data release.",
+      "events": ["Atlanta Fed GDPNow"]
+    },
+    {
+      "category": "OTHER",
+      "reason": "Bank supervision or calendar notice; not a monetary-policy or macroeconomic release.",
+      "events": ["Fed Bank Stress Test Results", "Bank Holiday"]
+    },
+    {
+      "category": "GOVERNMENT_FISCAL",
+      "reason": "Government debt, budget or capital-flow report with little direct bearing on Gold.",
+      "events": ["*-y Bond Auction", "Federal Budget Balance", "Treasury Currency Report", "TIC Long-Term Purchases"]
+    },
+    {
+      "category": "ENERGY",
+      "reason": "Energy inventory report; relevant to oil and gas rather than to Gold.",
+      "events": ["Crude Oil Inventories", "Natural Gas Storage", "API Weekly Statistical Bulletin"]
+    },
+    {
+      "category": "TRADE",
+      "reason": "US trade figures; rarely move the USD or Gold on release.",
+      "events": ["Trade Balance", "Goods Trade Balance"]
+    },
+    {
+      "category": "CONSUMER_ACTIVITY",
+      "reason": "Minor consumer indicator with no established effect on Gold.",
+      "events": ["Consumer Credit m/m", "Wards Total Vehicle Sales"]
+    },
+    {
+      "category": "BUSINESS_ACTIVITY",
+      "reason": "Inventory data with no established effect on Gold.",
+      "events": ["*Wholesale Inventories m/m", "Business Inventories m/m"]
+    },
+    {
+      "category": "SENTIMENT",
+      "reason": "Minor sentiment survey with no established effect on Gold.",
+      "events": ["RCM/TIPP Economic Optimism", "NFIB Small Business Index"]
+    },
+    {
+      "category": "HOUSING",
+      "reason": "House-price index; slow-moving and not a Gold driver.",
+      "events": ["HPI m/m", "S&P/CS Composite-20 HPI ?/?"]
+    }
+  ],
+
+  "strong_gold_events": [
+    {
+      "category": "INFLATION",
+      "reason": "Major US inflation release with direct USD and monetary-policy relevance.",
+      "events": ["CPI ?/?", "Core CPI ?/?", "PPI ?/?", "Core PPI ?/?", "Core PCE Price Index ?/?", "PCE Price Index ?/?"]
+    },
+    {
+      "category": "EMPLOYMENT",
+      "reason": "Headline US labour-market release that shapes interest-rate expectations and the USD.",
+      "events": ["Non-Farm Employment Change", "Unemployment Rate", "Average Hourly Earnings ?/?"]
+    },
+    {
+      "category": "MONETARY_POLICY",
+      "reason": "Federal Reserve interest-rate decision or its official policy communication.",
+      "events": ["Federal Funds Rate", "FOMC Statement", "FOMC Press Conference", "FOMC Economic Projections"]
+    },
+    {
+      "category": "FED_COMMUNICATION",
+      "reason": "Fed Chair or full-committee communication that can shift interest-rate expectations.",
+      "events": ["Fed Chair * Speaks", "Fed Chair * Testifies", "FOMC Meeting Minutes"]
+    },
+    {
+      "category": "GROWTH",
+      "reason": "Headline US economic-growth release.",
+      "events": ["Advance GDP q/q", "Prelim GDP q/q"]
+    },
+    {
+      "category": "CONSUMER_ACTIVITY",
+      "reason": "Headline US consumer-demand release.",
+      "events": ["Retail Sales m/m", "Core Retail Sales m/m"]
+    }
+  ],
+
+  "moderate_gold_events": [
+    {
+      "category": "EMPLOYMENT",
+      "reason": "Secondary US labour-market release that feeds expectations for the main employment report.",
+      "events": ["ADP Non-Farm Employment Change", "Unemployment Claims", "JOLTS Job Openings", "Employment Cost Index q/q"]
+    },
+    {
+      "category": "INFLATION",
+      "reason": "Secondary US inflation gauge, below the main CPI, PPI and PCE releases.",
+      "events": ["*UoM Inflation Expectations", "*GDP Price Index q/q", "ISM Manufacturing Prices"]
+    },
+    {
+      "category": "MANUFACTURING",
+      "reason": "Leading national US manufacturing survey.",
+      "events": ["ISM Manufacturing PMI"]
+    },
+    {
+      "category": "SERVICES",
+      "reason": "Leading national US services survey.",
+      "events": ["ISM Services PMI"]
+    },
+    {
+      "category": "SENTIMENT",
+      "reason": "US consumer sentiment release with potential USD impact, below the major inflation and employment releases.",
+      "events": ["CB Consumer Confidence", "*UoM Consumer Sentiment"]
+    },
+    {
+      "category": "FED_COMMUNICATION",
+      "reason": "Federal Reserve communication below the level of a rate decision or a Fed Chair appearance.",
+      "events": ["FOMC Member * Speaks", "Beige Book", "Fed Monetary Policy Report", "Jackson Hole Symposium"]
+    },
+    {
+      "category": "GROWTH",
+      "reason": "Final revision of US GDP; usually close to the earlier estimates.",
+      "events": ["Final GDP q/q"]
+    },
+    {
+      "category": "BUSINESS_ACTIVITY",
+      "reason": "US business-investment indicator with occasional USD impact.",
+      "events": ["Durable Goods Orders m/m", "Core Durable Goods Orders m/m"]
+    },
+    {
+      "category": "CONSUMER_ACTIVITY",
+      "reason": "US consumer-spending release, published alongside the PCE inflation data.",
+      "events": ["Personal Spending m/m"]
+    }
+  ],
+
+  "weak_gold_events": [
+    {
+      "category": "MANUFACTURING",
+      "reason": "Regional or secondary manufacturing indicator; limited direct effect on Gold.",
+      "events": [
+        "Flash Manufacturing PMI", "Final Manufacturing PMI", "Chicago PMI",
+        "Philly Fed Manufacturing Index", "Empire State Manufacturing Index", "Richmond Manufacturing Index",
+        "Industrial Production m/m", "Capacity Utilization Rate", "Factory Orders m/m"
+      ]
+    },
+    {
+      "category": "SERVICES",
+      "reason": "Secondary services survey; the ISM survey carries more weight.",
+      "events": ["Flash Services PMI", "Final Services PMI"]
+    },
+    {
+      "category": "HOUSING",
+      "reason": "US housing indicator; a secondary input for the USD and Gold.",
+      "events": ["Existing Home Sales", "New Home Sales", "Pending Home Sales m/m", "Building Permits", "Housing Starts"]
+    },
+    {
+      "category": "EMPLOYMENT",
+      "reason": "Minor labour-market indicator; far less followed than the monthly employment reports.",
+      "events": ["ADP Weekly Employment Change", "Challenger Job Cuts y/y"]
+    },
+    {
+      "category": "INFLATION",
+      "reason": "Minor price or cost indicator; a secondary input for the inflation outlook.",
+      "events": ["Import Prices m/m", "*Unit Labor Costs q/q"]
+    },
+    {
+      "category": "CONSUMER_ACTIVITY",
+      "reason": "Household income data; secondary to the spending and inflation figures released with it.",
+      "events": ["Personal Income m/m"]
+    },
+    {
+      "category": "GOVERNMENT_FISCAL",
+      "reason": "Political or Treasury remarks; the content is unpredictable and only sometimes concerns the USD or monetary policy.",
+      "events": ["President * Speaks", "Treasury Sec * Speaks"]
+    }
+  ],
+
+  "critical_events": {
+    "_about": "Top-tier events. They earn the 'critical_event' points below; with Strong relevance this normally produces CRITICAL.",
+    "events": [
+      "CPI ?/?", "Core CPI ?/?", "Core PCE Price Index ?/?",
+      "Non-Farm Employment Change", "Unemployment Rate", "Average Hourly Earnings ?/?",
+      "Federal Funds Rate", "FOMC Statement", "FOMC Press Conference", "FOMC Economic Projections",
+      "Fed Chair * Speaks", "Fed Chair * Testifies"
+    ]
+  },
+
+  "high_priority_events": {
+    "_about": "Second-tier events. They earn the 'high_priority_event' points below.",
+    "events": [
+      "PPI ?/?", "Core PPI ?/?", "PCE Price Index ?/?",
+      "Advance GDP q/q", "Prelim GDP q/q", "Retail Sales m/m", "Core Retail Sales m/m",
+      "FOMC Meeting Minutes",
+      "ADP Non-Farm Employment Change", "Unemployment Claims", "JOLTS Job Openings", "Employment Cost Index q/q",
+      "ISM Manufacturing PMI", "ISM Services PMI"
+    ]
+  },
+
+  "scoring": {
+    "_about": "priority_score = impact points + gold relevance points + event importance points (0 to 100). It ranks editorial importance only.",
+    "impact_points": {"High": 30, "Medium": 20, "Low": 10, "Holiday": 0, "None": 0},
+    "gold_relevance_points": {"STRONG": 40, "MODERATE": 25, "WEAK": 10, "NONE": 0},
+    "importance_points": {"critical_event": 30, "high_priority_event": 15, "other": 0},
+    "priority_thresholds": {"CRITICAL": 90, "HIGH": 65, "MEDIUM": 40},
+    "max_priority_by_gold_relevance": {"NONE": "LOW", "WEAK": "MEDIUM", "MODERATE": "HIGH"}
+  },
+
+  "highlight": {
+    "_about": "highlight_required is true for every priority listed in 'priorities', and for HIGH-priority events named in 'high_priority_events'.",
+    "priorities": ["CRITICAL"],
+    "high_priority_events": ["FOMC Meeting Minutes"]
+  }
+}

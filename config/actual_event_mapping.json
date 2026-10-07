@@ -1,0 +1,146 @@
+{
+  "_about": [
+    "Where the released Actual value of a Forex Factory event is obtained. Forex Factory stays the source of the event itself.",
+    "An event is enriched only if its full Forex Factory name is listed under 'forex_factory_events' (case-insensitive, whole name). There is no keyword or fuzzy matching.",
+    "provider + series_id name the official data series. 'reference_period' says which period a release reports, so the value is taken for exactly that period and never from an older release.",
+    "transform: 'level' = the published figure itself; 'change' = this period minus the previous one; 'percent_change' = percentage change over 'periods' months.",
+    "The result is formatted as Forex Factory writes it: value x scale, rounded to 'decimals', followed by 'suffix'."
+  ],
+
+  "mapping_version": "1.0.0",
+  "currency": "USD",
+
+  "providers": {
+    "BLS": {
+      "name": "U.S. Bureau of Labor Statistics, Public Data API",
+      "official": true,
+      "api_key_env": "BLS_API_KEY",
+      "api_key_required": false
+    },
+    "FRED": {
+      "name": "FRED, Federal Reserve Bank of St. Louis (republishes BEA, Census, Department of Labor and Federal Reserve Board data)",
+      "official": true,
+      "api_key_env": "FRED_API_KEY",
+      "api_key_required": true
+    }
+  },
+
+  "events_without_actual": {
+    "_about": "Speeches, statements and notices. They have no numeric result, so no provider is ever asked. * = any text.",
+    "events": [
+      "FOMC Member * Speaks", "Fed Chair * Speaks", "Fed Chair * Testifies",
+      "FOMC Statement", "FOMC Press Conference", "FOMC Meeting Minutes", "FOMC Economic Projections",
+      "Fed Monetary Policy Report", "Beige Book", "Jackson Hole Symposium",
+      "President * Speaks", "Treasury Sec * Speaks", "Bank Holiday"
+    ]
+  },
+
+  "mappings": [
+    {
+      "forex_factory_events": ["CPI m/m"],
+      "provider": "BLS", "series_id": "CUSR0000SA0",
+      "series_name": "CPI-U, all items, seasonally adjusted, 1-month percent change",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "percent_change", "periods": 1, "scale": 1, "decimals": 1, "suffix": "%"
+    },
+    {
+      "forex_factory_events": ["CPI y/y"],
+      "provider": "BLS", "series_id": "CUUR0000SA0",
+      "series_name": "CPI-U, all items, not seasonally adjusted, 12-month percent change",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "percent_change", "periods": 12, "scale": 1, "decimals": 1, "suffix": "%"
+    },
+    {
+      "forex_factory_events": ["Core CPI m/m"],
+      "provider": "BLS", "series_id": "CUSR0000SA0L1E",
+      "series_name": "CPI-U, all items less food and energy, seasonally adjusted, 1-month percent change",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "percent_change", "periods": 1, "scale": 1, "decimals": 1, "suffix": "%"
+    },
+    {
+      "forex_factory_events": ["PPI m/m"],
+      "provider": "BLS", "series_id": "WPSFD4",
+      "series_name": "PPI final demand, seasonally adjusted, 1-month percent change",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "percent_change", "periods": 1, "scale": 1, "decimals": 1, "suffix": "%"
+    },
+    {
+      "forex_factory_events": ["Core PPI m/m"],
+      "provider": "BLS", "series_id": "WPSFD49104",
+      "series_name": "PPI final demand less foods and energy, seasonally adjusted, 1-month percent change",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "percent_change", "periods": 1, "scale": 1, "decimals": 1, "suffix": "%"
+    },
+    {
+      "forex_factory_events": ["Non-Farm Employment Change"],
+      "provider": "BLS", "series_id": "CES0000000001",
+      "series_name": "Total nonfarm employment, seasonally adjusted, 1-month change in thousands",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "change", "periods": 1, "scale": 1, "decimals": 0, "suffix": "K"
+    },
+    {
+      "forex_factory_events": ["Unemployment Rate"],
+      "provider": "BLS", "series_id": "LNS14000000",
+      "series_name": "Unemployment rate, seasonally adjusted",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "level", "scale": 1, "decimals": 1, "suffix": "%"
+    },
+    {
+      "forex_factory_events": ["Average Hourly Earnings m/m"],
+      "provider": "BLS", "series_id": "CES0500000003",
+      "series_name": "Average hourly earnings, total private, seasonally adjusted, 1-month percent change",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "percent_change", "periods": 1, "scale": 1, "decimals": 1, "suffix": "%"
+    },
+
+    {
+      "forex_factory_events": ["Core PCE Price Index m/m"],
+      "provider": "FRED", "series_id": "PCEPILFE",
+      "series_name": "PCE price index excluding food and energy (BEA), 1-month percent change",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "percent_change", "periods": 1, "scale": 1, "decimals": 1, "suffix": "%"
+    },
+    {
+      "forex_factory_events": ["PCE Price Index m/m"],
+      "provider": "FRED", "series_id": "PCEPI",
+      "series_name": "PCE price index (BEA), 1-month percent change",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "percent_change", "periods": 1, "scale": 1, "decimals": 1, "suffix": "%"
+    },
+    {
+      "forex_factory_events": ["Advance GDP q/q", "Prelim GDP q/q", "Final GDP q/q"],
+      "provider": "FRED", "series_id": "A191RL1Q225SBEA",
+      "series_name": "Real GDP (BEA), percent change from preceding quarter, annual rate",
+      "frequency": "quarterly", "reference_period": "previous_quarter",
+      "transform": "level", "scale": 1, "decimals": 1, "suffix": "%"
+    },
+    {
+      "forex_factory_events": ["Retail Sales m/m"],
+      "provider": "FRED", "series_id": "RSAFS",
+      "series_name": "Advance retail sales, retail trade and food services (Census Bureau), 1-month percent change",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "percent_change", "periods": 1, "scale": 1, "decimals": 1, "suffix": "%"
+    },
+    {
+      "forex_factory_events": ["Core Retail Sales m/m"],
+      "provider": "FRED", "series_id": "RSFSXMV",
+      "series_name": "Advance retail sales excluding motor vehicles and parts (Census Bureau), 1-month percent change",
+      "frequency": "monthly", "reference_period": "previous_month",
+      "transform": "percent_change", "periods": 1, "scale": 1, "decimals": 1, "suffix": "%"
+    },
+    {
+      "forex_factory_events": ["Unemployment Claims"],
+      "provider": "FRED", "series_id": "ICSA",
+      "series_name": "Initial jobless claims, seasonally adjusted (Department of Labor), in thousands",
+      "frequency": "weekly", "reference_period": "previous_saturday",
+      "transform": "level", "scale": 0.001, "decimals": 0, "suffix": "K"
+    },
+    {
+      "forex_factory_events": ["Federal Funds Rate"],
+      "provider": "FRED", "series_id": "DFEDTARU",
+      "series_name": "Federal funds target range, upper limit (Federal Reserve Board)",
+      "frequency": "daily", "reference_period": "day_after_release",
+      "transform": "level", "scale": 1, "decimals": 2, "suffix": "%"
+    }
+  ]
+}

@@ -1,0 +1,94 @@
+# Safe test of the cloud runner.
+#
+# Runs ONLY when started by hand (Actions tab -> "Safe test" -> Run workflow).
+# It checks the configuration, the database and the WhatsApp connection, and
+# shows what WOULD be sent. It never sends a WhatsApp message:
+#   * every --whatsapp-send-... command below carries --dry-run
+#   * --whatsapp-test is not used
+#   * there is no "schedule:" trigger
+# tests/test_cloud_runner.py enforces all three.
+
+name: Safe test (sends nothing)
+
+on:
+  workflow_dispatch:
+
+# The job only reads the repository.
+permissions:
+  contents: read
+
+# One run of this automation at a time, across every workflow that uses this
+# group name. A second run waits for the first to finish; a running job is
+# never cancelled part-way, so a send can never be interrupted or doubled.
+concurrency:
+  group: market-news-automation
+  cancel-in-progress: false
+
+jobs:
+  safe-test:
+    name: Health check and dry runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUNBUFFERED: "1"
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      # No secret is given to this step: the tests are offline by design.
+      - name: Run the test suite
+        run: python -m pytest -q
+
+      - name: Preflight (reports PRESENT or MISSING, never a value)
+        env:
+          DATABASE_BACKEND: postgres
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          BLS_API_KEY: ${{ secrets.BLS_API_KEY }}
+          WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
+          WHATSAPP_COMMUNITY_ID: ${{ secrets.WHATSAPP_COMMUNITY_ID }}
+          WHATSAPP_ANNOUNCEMENT_CHAT_ID: ${{ secrets.WHATSAPP_ANNOUNCEMENT_CHAT_ID }}
+        run: python -m src.preflight --production
+
+      - name: WhatsApp health check (sends nothing)
+        env:
+          DATABASE_BACKEND: postgres
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
+          WHATSAPP_COMMUNITY_ID: ${{ secrets.WHATSAPP_COMMUNITY_ID }}
+          WHATSAPP_ANNOUNCEMENT_CHAT_ID: ${{ secrets.WHATSAPP_ANNOUNCEMENT_CHAT_ID }}
+        run: python -m src.main --whatsapp-check
+
+      - name: Actual-value sources, dry run (writes nothing)
+        env:
+          DATABASE_BACKEND: postgres
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          BLS_API_KEY: ${{ secrets.BLS_API_KEY }}
+        run: python -m src.main --enrich-actuals --week --dry-run
+
+      # No WHAPI_TOKEN here: a dry run does not need it, so it cannot send.
+      - name: Morning update, dry run (sends nothing)
+        env:
+          DATABASE_BACKEND: postgres
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          WHATSAPP_ANNOUNCEMENT_CHAT_ID: ${{ secrets.WHATSAPP_ANNOUNCEMENT_CHAT_ID }}
+        run: python -m src.main --whatsapp-send-morning --dry-run
+
+      - name: Alerts, results and reminders, dry run (sends nothing)
+        env:
+          DATABASE_BACKEND: postgres
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          WHATSAPP_ANNOUNCEMENT_CHAT_ID: ${{ secrets.WHATSAPP_ANNOUNCEMENT_CHAT_ID }}
+        run: python -m src.main --whatsapp-send-alert --whatsapp-send-actuals --whatsapp-send-upcoming --week --dry-run

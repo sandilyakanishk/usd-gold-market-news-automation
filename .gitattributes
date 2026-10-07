@@ -1,0 +1,4 @@
+# Store and check out text with LF line endings on every platform, so the
+# files are identical on Windows and on the Linux cloud runner.
+* text=auto eol=lf
+*.db binary

@@ -1,0 +1,66 @@
+{
+  "_about": [
+    "Sample events for previewing and testing message templates (python -m src.main --preview-... --fixture).",
+    "These are NOT real releases and are never written to any database. Names are real Forex Factory event names.",
+    "Each event is classified by the real Step 2 rules and compared with its forecast by the real Step 3 logic.",
+    "'reference_time_utc' is the moment the preview pretends it is: 09:00 India time on 12 November 2026."
+  ],
+
+  "reference_time_utc": "2026-11-12T03:30:00Z",
+
+  "events": [
+    {"name": "CPI m/m", "release_utc": "2026-11-12T13:30:00Z", "impact": "High", "forecast": "0.3%", "previous": "0.4%"},
+    {"name": "Core CPI m/m", "release_utc": "2026-11-12T13:30:00Z", "impact": "High", "forecast": "0.3%", "previous": "0.3%"},
+    {"name": "Unemployment Claims", "release_utc": "2026-11-12T13:30:00Z", "impact": "Medium", "forecast": "220K", "previous": "218K"},
+    {"name": "FOMC Member Williams Speaks", "release_utc": "2026-11-12T15:00:00Z", "impact": "Low"},
+    {"name": "Natural Gas Storage", "release_utc": "2026-11-12T15:30:00Z", "impact": "Low", "forecast": "45B", "previous": "38B"},
+    {"name": "30-y Bond Auction", "release_utc": "2026-11-12T18:01:00Z", "impact": "Low", "previous": "4.83|2.4"},
+
+    {"name": "Federal Funds Rate", "release_utc": "2026-11-13T19:00:00Z", "impact": "High", "forecast": "4.00%", "previous": "4.00%"},
+    {"name": "FOMC Meeting Minutes", "release_utc": "2026-11-18T19:00:00Z", "impact": "High"},
+    {"name": "Retail Sales m/m", "release_utc": "2026-11-17T13:30:00Z", "impact": "High", "forecast": "0.3%", "previous": "0.4%"},
+
+    {"name": "Non-Farm Employment Change", "release_utc": "2026-11-06T13:30:00Z", "impact": "High",
+     "forecast": "50K", "previous": "29K", "actual": "85K",
+     "actual_source": "BLS", "actual_source_event": "CES0000000001: Total nonfarm employment, seasonally adjusted, 1-month change in thousands",
+     "actual_period": "2026-10", "actual_revision": 1},
+    {"name": "Unemployment Rate", "release_utc": "2026-11-06T13:30:00Z", "impact": "High",
+     "forecast": "4.2%", "previous": "4.2%", "actual": "4.1%",
+     "actual_source": "BLS", "actual_source_event": "LNS14000000: Unemployment rate, seasonally adjusted",
+     "actual_period": "2026-10", "actual_revision": 1},
+    {"name": "Average Hourly Earnings m/m", "release_utc": "2026-11-06T13:30:00Z", "impact": "High",
+     "forecast": "0.3%", "previous": "0.1%", "actual": "0.3%",
+     "actual_source": "BLS", "actual_source_event": "CES0500000003: Average hourly earnings, total private, seasonally adjusted, 1-month percent change",
+     "actual_period": "2026-10", "actual_revision": 1},
+    {"name": "Core PCE Price Index m/m", "release_utc": "2026-10-30T12:30:00Z", "impact": "High",
+     "forecast": "0.2%", "previous": "0.2%", "actual": "0.3%",
+     "actual_source": "FRED", "actual_source_event": "PCEPILFE: PCE price index excluding food and energy (BEA), 1-month percent change",
+     "actual_period": "2026-09", "actual_revision": 1},
+    {"name": "Core Retail Sales m/m", "release_utc": "2026-10-16T12:30:00Z", "impact": "Medium",
+     "previous": "1.3%", "actual": "0.4%",
+     "actual_source": "FRED", "actual_source_event": "RSFSXMV: Advance retail sales excluding motor vehicles and parts (Census Bureau), 1-month percent change",
+     "actual_period": "2026-09", "actual_revision": 1},
+    {"name": "PPI m/m", "release_utc": "2026-11-11T13:30:00Z", "impact": "Medium",
+     "forecast": "0.2%", "actual": "0.1%",
+     "actual_source": "BLS", "actual_source_event": "WPSFD4: PPI final demand, seasonally adjusted, 1-month percent change",
+     "actual_period": "2026-10", "actual_revision": 2},
+    {"name": "Federal Funds Rate", "release_utc": "2026-09-16T18:00:00Z", "impact": "High",
+     "forecast": "4.00%", "previous": "4.25%", "actual": "4.00%",
+     "actual_source": "FRED", "actual_source_event": "DFEDTARU: Federal funds target range, upper limit (Federal Reserve Board)",
+     "actual_period": "2026-09-17", "actual_revision": 1},
+    {"name": "CPI m/m", "release_utc": "2026-10-14T12:30:00Z", "impact": "High",
+     "forecast": "0.3%", "previous": "0.4%", "actual": "0.5%",
+     "actual_source": "BLS", "actual_source_event": "CUSR0000SA0: CPI-U, all items, seasonally adjusted, 1-month percent change",
+     "actual_period": "2026-09", "actual_revision": 1},
+    {"name": "CPI y/y", "release_utc": "2026-10-14T12:30:00Z", "impact": "High",
+     "forecast": "3.4%", "previous": "3.4%", "actual": "3.2%",
+     "actual_source": "BLS", "actual_source_event": "CUUR0000SA0: CPI-U, all items, not seasonally adjusted, 12-month percent change",
+     "actual_period": "2026-09", "actual_revision": 1},
+    {"name": "Core CPI m/m", "release_utc": "2026-10-14T12:30:00Z", "impact": "High",
+     "forecast": "0.3%", "previous": "0.3%", "actual": "0.3%",
+     "actual_source": "BLS", "actual_source_event": "CUSR0000SA0L1E: CPI-U, all items less food and energy, seasonally adjusted, 1-month percent change",
+     "actual_period": "2026-09", "actual_revision": 1},
+
+    {"name": "ISM Services PMI", "release_utc": "2026-11-04T15:00:00Z", "impact": "Medium", "forecast": "55.0", "previous": "55.1"}
+  ]
+}

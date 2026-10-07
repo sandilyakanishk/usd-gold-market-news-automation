@@ -1,0 +1,33 @@
+# Secrets and local configuration. Only .env.example is ever committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime data: local database, cached feed, logs
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db

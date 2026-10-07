@@ -1,0 +1,100 @@
+{
+  "_about": [
+    "How the HEADLINE of a message is written. A headline is presentation only.",
+    "It never replaces event_name, which is always Forex Factory's exact event name and is shown separately.",
+    "'events' lists exact Forex Factory names (case-insensitive, whole name). * = any text and can be reused in a headline as {1}.",
+    "A headline is chosen by the event's state: UPCOMING (not released yet), PASSED (time has passed, no figure),",
+    "ABOVE_FORECAST / BELOW_FORECAST / IN_LINE_WITH_FORECAST (figure released and compared), RELEASED (figure released, nothing to compare with).",
+    "A rule either gives 'subject', 'short' and optionally 'verb' for the shared 'patterns', or its own 'headlines' per state.",
+    "Usable in headline text: {flag} {subject} {short} {verb} {when} {actual} {forecast} {previous} {1}.",
+    "State facts only. No trade direction, no forecast of what any market will do."
+  ],
+
+  "headline_rules_version": "1.0.0",
+
+  "flag": "🇺🇸",
+
+  "when": {"today": "today", "tomorrow": "tomorrow", "other": "on {day_month}"},
+
+  "patterns": {
+    "UPCOMING": "{flag} {subject} due {when}",
+    "PASSED": "{flag} {subject}",
+    "RELEASED": "{flag} {short} released",
+    "ABOVE_FORECAST": "{flag} {short} {verb} above expectations",
+    "BELOW_FORECAST": "{flag} {short} {verb} below expectations",
+    "IN_LINE_WITH_FORECAST": "{flag} {short} in line with expectations"
+  },
+
+  "default_verb": "comes in",
+
+  "rules": [
+    {"events": ["CPI m/m", "CPI y/y"], "subject": "US CPI inflation data", "short": "US CPI"},
+    {"events": ["Core CPI m/m"], "subject": "US core CPI inflation data", "short": "US core CPI"},
+    {"events": ["PPI m/m"], "subject": "US producer price (PPI) data", "short": "US PPI"},
+    {"events": ["Core PPI m/m"], "subject": "US core producer price (PPI) data", "short": "US core PPI"},
+    {"events": ["Core PCE Price Index m/m"], "subject": "US core PCE inflation data", "short": "US core PCE inflation"},
+    {"events": ["PCE Price Index m/m"], "subject": "US PCE inflation data", "short": "US PCE inflation"},
+
+    {"events": ["Non-Farm Employment Change"], "subject": "US non-farm payrolls report", "short": "US non-farm payrolls", "verb": "come in"},
+    {"events": ["Unemployment Rate"], "subject": "US unemployment rate", "short": "US unemployment rate"},
+    {"events": ["Average Hourly Earnings m/m"], "subject": "US wage growth data", "short": "US average hourly earnings", "verb": "come in"},
+    {"events": ["ADP Non-Farm Employment Change"], "subject": "US ADP private payrolls report", "short": "US ADP private payrolls", "verb": "come in"},
+    {"events": ["Unemployment Claims"], "subject": "US weekly jobless claims", "short": "US weekly jobless claims", "verb": "come in"},
+    {"events": ["JOLTS Job Openings"], "subject": "US JOLTS job openings", "short": "US job openings", "verb": "come in"},
+
+    {
+      "events": ["Federal Funds Rate"],
+      "compare_to": "previous",
+      "headlines": {
+        "UPCOMING": "🚨 Fed interest-rate decision due {when}",
+        "PASSED": "🚨 Fed interest-rate decision",
+        "RELEASED": "🚨 Fed interest-rate decision announced: {actual}",
+        "ABOVE_FORECAST": "🚨 Fed raises interest rates to {actual}",
+        "BELOW_FORECAST": "🚨 Fed cuts interest rates to {actual}",
+        "IN_LINE_WITH_FORECAST": "🚨 Fed leaves interest rates unchanged at {actual}"
+      }
+    },
+    {"events": ["FOMC Statement"], "headlines": {"UPCOMING": "🚨 Fed policy statement due {when}", "PASSED": "🚨 Fed policy statement published"}},
+    {"events": ["FOMC Press Conference"], "headlines": {"UPCOMING": "🚨 Fed Chair press conference due {when}", "PASSED": "🚨 Fed Chair press conference"}},
+    {"events": ["FOMC Economic Projections"], "headlines": {"UPCOMING": "{flag} Fed economic projections due {when}", "PASSED": "{flag} Fed economic projections published"}},
+    {"events": ["FOMC Meeting Minutes"], "headlines": {"UPCOMING": "{flag} Fed meeting minutes due {when}", "PASSED": "{flag} Fed meeting minutes published"}},
+    {"events": ["Fed Chair * Speaks"], "headlines": {"UPCOMING": "{flag} Fed Chair {1} due to speak {when}", "PASSED": "{flag} Fed Chair {1} speech"}},
+    {"events": ["Fed Chair * Testifies"], "headlines": {"UPCOMING": "{flag} Fed Chair {1} due to testify {when}", "PASSED": "{flag} Fed Chair {1} testimony"}},
+    {"events": ["FOMC Member * Speaks"], "headlines": {"UPCOMING": "{flag} Fed official {1} due to speak {when}", "PASSED": "{flag} Fed official {1} speech"}},
+    {"events": ["Beige Book"], "headlines": {"UPCOMING": "{flag} Fed Beige Book due {when}", "PASSED": "{flag} Fed Beige Book published"}},
+    {"events": ["President * Speaks"], "headlines": {"UPCOMING": "{flag} President {1} due to speak {when}", "PASSED": "{flag} President {1} speech"}},
+    {"events": ["Treasury Sec * Speaks"], "headlines": {"UPCOMING": "{flag} Treasury Secretary {1} due to speak {when}", "PASSED": "{flag} Treasury Secretary {1} speech"}},
+
+    {"events": ["Advance GDP q/q"], "subject": "US GDP growth data (advance estimate)", "short": "US GDP growth"},
+    {"events": ["Prelim GDP q/q"], "subject": "US GDP growth data (second estimate)", "short": "US GDP growth"},
+    {"events": ["Final GDP q/q"], "subject": "US GDP growth data (final estimate)", "short": "US GDP growth"},
+    {"events": ["Retail Sales m/m"], "subject": "US retail sales data", "short": "US retail sales", "verb": "come in"},
+    {"events": ["Core Retail Sales m/m"], "subject": "US core retail sales data", "short": "US core retail sales", "verb": "come in"},
+
+    {"events": ["ISM Manufacturing PMI"], "subject": "US ISM manufacturing survey", "short": "US ISM manufacturing index"},
+    {"events": ["ISM Services PMI"], "subject": "US ISM services survey", "short": "US ISM services index"},
+    {"events": ["CB Consumer Confidence"], "subject": "US consumer confidence survey", "short": "US consumer confidence"},
+    {"events": ["*UoM Consumer Sentiment"], "subject": "US consumer sentiment survey", "short": "US consumer sentiment"},
+    {"events": ["*UoM Inflation Expectations"], "subject": "US consumer inflation expectations", "short": "US consumer inflation expectations", "verb": "come in"}
+  ],
+
+  "category_fallback": {
+    "_about": "Used when no rule names the event. Keyed by the Step 2 category.",
+    "MONETARY_POLICY": {"subject": "Federal Reserve policy event", "short": "Federal Reserve policy figure"},
+    "FED_COMMUNICATION": {"subject": "Federal Reserve communication", "short": "Federal Reserve communication"},
+    "INFLATION": {"subject": "US inflation data", "short": "US inflation figure"},
+    "EMPLOYMENT": {"subject": "US labour-market data", "short": "US labour-market figure"},
+    "GROWTH": {"subject": "US growth data", "short": "US growth figure"},
+    "CONSUMER_ACTIVITY": {"subject": "US consumer data", "short": "US consumer figure"},
+    "BUSINESS_ACTIVITY": {"subject": "US business activity data", "short": "US business activity figure"},
+    "MANUFACTURING": {"subject": "US manufacturing data", "short": "US manufacturing figure"},
+    "SERVICES": {"subject": "US services-sector data", "short": "US services-sector figure"},
+    "HOUSING": {"subject": "US housing data", "short": "US housing figure"},
+    "TRADE": {"subject": "US trade data", "short": "US trade figure"},
+    "ENERGY": {"subject": "US energy inventory data", "short": "US energy inventory figure"},
+    "GOVERNMENT_FISCAL": {"subject": "US government or Treasury event", "short": "US Treasury figure"},
+    "SENTIMENT": {"subject": "US sentiment survey", "short": "US sentiment reading"}
+  },
+
+  "default": {"subject": "US economic data", "short": "US economic figure"}
+}

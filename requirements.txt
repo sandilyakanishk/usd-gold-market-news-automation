@@ -1,0 +1,8 @@
+# IANA timezone database (Windows and slim cloud images do not ship one).
+tzdata>=2024.1
+
+# PostgreSQL driver, used only when DATABASE_BACKEND=postgres.
+psycopg[binary]>=3.2
+
+# Development
+pytest>=8.0

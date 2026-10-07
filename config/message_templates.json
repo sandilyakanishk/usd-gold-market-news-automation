@@ -1,0 +1,155 @@
+{
+  "_about": [
+    "Message templates and selection rules. This file only shapes text; it never changes stored data.",
+    "Each template is a list of lines. {name} is replaced by a value; the full list of names is in the README.",
+    "{event_name} is always Forex Factory's exact event name. {headline} / {headline_text} is the generated headline. Keep both.",
+    "A missing value is printed as 'missing_value'. A line is dropped entirely when it uses a name listed in 'omit_line_if_missing' and that value is missing.",
+    "Formatting: *bold* and _italic_ only, so the text reads the same in Telegram and WhatsApp.",
+    "Wording must stay factual: no trade direction and no statement of what any market will do."
+  ],
+
+  "templates_version": "1.0.0",
+
+  "missing_value": "-",
+
+  "time": {
+    "time_format": "%I:%M %p",
+    "date_format": "%d %b %Y",
+    "day_month_format": "%d %b",
+    "timezone_labels": {"Asia/Kolkata": "IST"}
+  },
+
+  "selection": {
+    "_about": "Which events each message type covers. Priorities and Gold relevance come from the Step 2 classification.",
+    "daily_minimum_priority": "MEDIUM",
+    "daily_require_gold_relevance": true,
+    "alert_requires_highlight": true,
+    "alert_only_before_release": true,
+    "upcoming_minimum_priority": "HIGH",
+    "upcoming_require_gold_relevance": true
+  },
+
+  "labels": {
+    "currency_flag": {"USD": "🇺🇸"},
+    "impact": {"High": "🔴 HIGH", "Medium": "🟠 MEDIUM", "Low": "🟡 LOW", "Holiday": "⚪ HOLIDAY", "None": "⚪ NONE"},
+    "gold_relevance_level": {"STRONG": "🟢 STRONG", "MODERATE": "🟡 MODERATE", "WEAK": "⚪ WEAK", "NONE": "⚫ NONE"},
+    "priority": {"CRITICAL": "🔴 CRITICAL", "HIGH": "🟠 HIGH", "MEDIUM": "🟡 MEDIUM", "LOW": "⚪ LOW"},
+    "surprise_status": {
+      "ABOVE_FORECAST": "🔺 ABOVE FORECAST",
+      "BELOW_FORECAST": "🔻 BELOW FORECAST",
+      "IN_LINE_WITH_FORECAST": "➖ IN LINE WITH FORECAST"
+    },
+    "yes": "YES",
+    "no": "NO",
+    "revision_note": "Revised figure (revision {actual_revision})"
+  },
+
+  "sources": {
+    "calendar": "Forex Factory",
+    "attribution": {
+      "FRED": "This product uses the FRED® API but is not endorsed or certified by the Federal Reserve Bank of St. Louis."
+    }
+  },
+
+  "omit_line_if_missing": ["actual", "surprise_label", "attribution", "revision_note"],
+
+  "templates": {
+    "MORNING_UPDATE": {
+      "header": [
+        "📅 *USD + GOLD DAILY UPDATE*",
+        "━━━━━━━━━━━━━━━━━━",
+        "📆 {weekday}, {date}",
+        ""
+      ],
+      "event": [
+        "📰 {headline_text}",
+        "{currency_flag} {display_time}",
+        "*{event_name}*",
+        "Impact: {impact_label}",
+        "Gold: {gold_label}",
+        "Priority: {priority_label}",
+        "Previous: {previous}",
+        "Forecast: {forecast}",
+        "Actual: {actual}"
+      ],
+      "event_separator": ["", "┄┄┄┄┄┄┄┄┄", ""],
+      "empty": ["No major USD / Gold events are scheduled for this day."],
+      "footer": [
+        "",
+        "━━━━━━━━━━━━━━━━━━",
+        "Source: {source}"
+      ]
+    },
+
+    "HIGH_ALERT": {
+      "body": [
+        "🚨 *HIGH IMPACT ALERT*",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+        "📰 {headline_text}",
+        "",
+        "{currency_flag} *{event_name}*",
+        "",
+        "⏰ {display_time}, {weekday} {date}",
+        "",
+        "Impact: {impact_label}",
+        "Gold: {gold_label}",
+        "Priority: {priority_label}",
+        "",
+        "Previous: {previous}",
+        "Forecast: {forecast}",
+        "",
+        "━━━━━━━━━━━━━━━━━━",
+        "Source: {source}"
+      ]
+    },
+
+    "ACTUAL_RESULT": {
+      "body": [
+        "📊 *USD DATA RELEASED*",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+        "📰 {headline_text}",
+        "",
+        "{currency_flag} *{event_name}*",
+        "{revision_note}",
+        "",
+        "Previous: {previous}",
+        "Forecast: {forecast}",
+        "Actual: *{actual}*",
+        "",
+        "Result: {surprise_label}",
+        "",
+        "Gold: {gold_label}",
+        "Priority: {priority_label}",
+        "",
+        "━━━━━━━━━━━━━━━━━━",
+        "Source: {actual_source} (calendar: {source})",
+        "_{attribution}_"
+      ]
+    },
+
+    "UPCOMING_REMINDER": {
+      "body": [
+        "⏰ *UPCOMING USD EVENT*",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+        "📰 {headline_text}",
+        "",
+        "{currency_flag} *{event_name}*",
+        "",
+        "Release: {display_time}, {weekday} {date}",
+        "",
+        "Impact: {impact_label}",
+        "Gold: {gold_label}",
+        "Priority: {priority_label}",
+        "",
+        "Previous: {previous}",
+        "Forecast: {forecast}",
+        "",
+        "━━━━━━━━━━━━━━━━━━",
+        "Source: {source}"
+      ]
+    }
+  }
+}
