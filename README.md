@@ -15,13 +15,11 @@ each one by Gold relevance, category and editorial priority.
   Announcements group through Whapi.Cloud (see
   [WhatsApp delivery](#whatsapp-delivery-step-5)).
 
-- **Step 6** adds the infrastructure to run the project on GitHub Actions
-  (see [Cloud runner](#cloud-runner-step-6)). So far it holds only a manual,
-  send-nothing test workflow.
+- **Step 6** runs the project on GitHub Actions (see
+  [Cloud runner](#cloud-runner-step-6)): a manual send-nothing test workflow,
+  and a scheduled production workflow that sends real messages.
 
-Telegram, AI analysis and an automatic schedule are later steps and are not in
-this repository yet. Nothing runs on its own: every message is sent by a
-command you run.
+Telegram and AI analysis are not in this repository.
 
 The classification is an editorial event-priority system for deciding which
 events deserve attention in a news feed. It is **not a trading signal system
@@ -805,19 +803,21 @@ client, so the adapter always sends this project's own `User-Agent`.
 
 ## Cloud runner (Step 6)
 
-The project can run on GitHub Actions, so it does not need your computer.
-What exists so far is infrastructure only: one workflow that you start by
-hand and that cannot send a message. There is **no schedule yet**, and no
-workflow that performs a real WhatsApp send.
+The project runs on GitHub Actions, so it does not need your computer. There
+are two workflows: **Safe test**, started by hand, which cannot send a
+message, and **Production**, which runs on a schedule and sends real WhatsApp
+messages.
 
 ### What is in the repository
 
 | File | Purpose |
 | --- | --- |
-| `.github/workflows/safe-test.yml` | manual "Safe test" workflow |
+| `.github/workflows/safe-test.yml` | manual "Safe test" workflow; sends nothing |
+| `.github/workflows/production.yml` | scheduled "Production" workflow; sends real messages |
 | `src/preflight.py` | reports Python version, backend and which settings are present |
 | `.gitignore`, `.gitattributes` | keep secrets and runtime files out; keep line endings identical on Windows and Linux |
-| `tests/test_cloud_runner.py` | fails the build if the workflow could ever send or run on a schedule |
+| `tests/test_cloud_runner.py` | fails the build if the safe test could ever send or run on a schedule |
+| `tests/test_production_workflow.py` | pins down what production may send, when, and under which conditions |
 
 ### Repository secrets
 
@@ -868,12 +868,68 @@ It cannot send a message: every send command carries `--dry-run`, the
 dry-run steps are not even given `WHAPI_TOKEN`, `--whatsapp-test` is not
 used, and the only trigger is `workflow_dispatch`.
 
+### The production workflow
+
+`production.yml` runs on a schedule and can also be started by hand. GitHub
+cron is in UTC; India time is UTC+5:30 all year.
+
+| Run | India time | Cron (UTC) | Sends |
+| --- | --- | --- | --- |
+| Morning | 08:15 | `45 2 * * *` | the daily update, today's high-impact alerts, any new results |
+| Polling | 17:37, 18:07, ... 00:37, 01:07 (16 runs) | `7,37 12-19 * * *` | any new results |
+| Evening | 21:15 | `45 15 * * *` | tomorrow's reminders, any new results |
+
+That is 18 runs a day, none on the hour, and none during the hours when no
+US figure is released. Scheduled runs can start late; GitHub does not
+guarantee the minute.
+
+Every run does the same things in the same order, using the existing
+commands:
+
+1. `python -m src.preflight --production` stops the run if a setting is missing.
+2. `--whatsapp-check` confirms the WhatsApp session and that the destination
+   is still the Community's Announcements group. It runs on morning, evening
+   and manual runs; polling runs skip it to stay within Whapi's request
+   allowance. If it fails, nothing is sent.
+3. `--enrich-actuals --week` downloads the Forex Factory calendar, stores and
+   classifies it, and asks BLS and FRED for released figures.
+4. The sends for that run type:
+   - morning: `--whatsapp-send-morning`, then `--whatsapp-send-alert --today`
+   - every run: `--whatsapp-send-actuals --from <yesterday>`
+   - evening: `--whatsapp-send-upcoming --tomorrow`
+
+Alerts are limited to today and reminders to tomorrow, so neither is ever
+posted for the whole week at once. Results reach back to yesterday (India
+time) so a figure released shortly before midnight is still picked up by the
+next run. A message that was already sent is skipped by the application, so
+running more often never produces a duplicate.
+
+Started by hand, the workflow performs a polling run unless you pick
+`morning` or `evening`. It never forces a message: the same selection rules
+and duplicate check apply.
+
+**Failures.** A database error, a missing setting, a failed WhatsApp send or a
+failed destination check ends the run with an error. The application itself
+carries on from stored data when the Forex Factory download is refused, and
+marks an event `FAILED` when BLS or FRED cannot be reached; the last step of
+the workflow turns either case into a failed run, so it is not missed. GitHub
+emails the repository owner when a scheduled run fails. Nothing is retried
+within a run; the next scheduled run simply tries again.
+
+**Stopping it.** In the Actions tab open **Production**, then the "..." menu,
+then **Disable workflow**; or run:
+
+```bash
+gh workflow disable production.yml
+```
+
+`gh workflow enable production.yml` turns it back on.
+
 ### One run at a time
 
-The workflow belongs to the concurrency group `market-news-automation` with
+Both workflows belong to the concurrency group `market-news-automation` with
 `cancel-in-progress: false`. A second run waits until the first has finished,
-and a run in progress is never cancelled. Any later workflow that sends
-messages must use the same group name, so two runs can never send at once;
+and a run in progress is never cancelled, so two runs can never send at once;
 that closes the simultaneous-run gap noted under WhatsApp delivery. GitHub
 keeps at most one run waiting per group: if several pile up, only the newest
 waiting one is kept.
@@ -894,10 +950,21 @@ waiting one is kept.
 3. Add the repository secrets listed above.
 4. Run the **Safe test** workflow and read its log.
 
-### Not built yet
+### Limits worth knowing
 
-- a recurring schedule
-- any workflow that sends a real message
+- Results are posted by the first run after a figure is published, so they
+  can arrive up to about half an hour after the release, or later if GitHub
+  starts the run late.
+- Whapi's free Sandbox plan is listed at 1,000 API requests a month. A day of
+  this schedule uses about four for the destination checks plus one per
+  message sent.
+- Without a BLS key the BLS limit is 25 requests a day, counted against
+  addresses shared with other GitHub users.
+- Forex Factory allows 2 downloads per 5 minutes, also counted per address.
+  No two runs are scheduled closer than eight minutes apart.
+
+### Not built
+
 - Telegram
 
 ## Database schema
