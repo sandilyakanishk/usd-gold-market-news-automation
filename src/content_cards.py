@@ -206,6 +206,19 @@ def ask_gemini(prompt: str, api_key: str, *, model: str, timeout: int = 20, user
     return item
 
 
+def ask_any_model(prompt: str, settings: Settings, *, ask=ask_gemini) -> dict:
+    """Ask each configured model in turn until one answers. Raises ContentError if none does."""
+    models = [m.strip() for m in str(settings.gemini_model).split(",") if m.strip()]
+    problems = []
+    for model in models:
+        try:
+            return ask(prompt, settings.gemini_api_key, model=model, timeout=settings.request_timeout_seconds,
+                       user_agent=settings.user_agent)
+        except ContentError as exc:
+            problems.append(f"{model}: {exc}")
+    raise ContentError("no AI model answered (" + "; ".join(problems) + ")" if problems else "no AI model is configured")
+
+
 # -- choosing the next item -----------------------------------------------------------------
 
 def _state(db: EventRepository, kind: str) -> tuple[int, list[str], int]:
@@ -228,8 +241,7 @@ def next_item(db: EventRepository, kind: str, library: dict, settings: Settings,
     if getattr(settings, "gemini_api_key", None):
         topic = TOPICS[made % len(TOPICS)]
         try:
-            raw = ask(build_prompt(kind, topic, recent), settings.gemini_api_key, model=settings.gemini_model,
-                      timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
+            raw = ask_any_model(build_prompt(kind, topic, recent), settings, ask=ask)
             item = validate(kind, raw)
             if _norm(headline(kind, item)) in seen:
                 raise ContentError("it repeats a recent item")
@@ -255,7 +267,7 @@ def build_text(kind: str, item: dict) -> str:
     if kind == "rule":
         return f"🛡 *TRADER'S RULE*\n\n*{item['title']}*\n{item['text']}\n\n_Protect the account first._"
     if kind == "fact":
-        return f"💡 *GOLD FACT*\n\n{item['text']}"
+        return f"💡 *DID YOU KNOW?*\n\n{item['text']}"
     if kind == "myth":
         return f"⚖️ *MYTH OR FACT?*\n\n❌ *Myth:* {item['myth']}\n\n✅ *Truth:* {item['truth']}"
     if kind == "lesson":

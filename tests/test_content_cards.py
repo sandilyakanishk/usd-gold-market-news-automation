@@ -165,7 +165,7 @@ def test_each_kind_has_its_own_look():
     looks = {kind: cc.build_text(kind, GOOD[kind]) for kind in cc.KINDS}
     assert looks["rule"] == ("🛡 *TRADER'S RULE*\n\n*Plan the exit first*\nDecide where you are wrong before entering, "
                              "while you are still calm and clear.\n\n_Protect the account first._")
-    assert looks["fact"].startswith("💡 *GOLD FACT*\n\n")
+    assert looks["fact"].startswith("💡 *DID YOU KNOW?*\n\n")
     assert looks["myth"] == ("⚖️ *MYTH OR FACT?*\n\n❌ *Myth:* Trading is a quick way to get income.\n\n"
                              "✅ *Truth:* It is a skill that takes long practice, and most beginners lose money at first.")
     assert looks["lesson"].startswith("📘 *LEARN: WHAT IS LIQUIDITY?*\n\n1️⃣ Liquidity is how") and "🎯 *Remember:*" in looks["lesson"]
@@ -285,6 +285,25 @@ def test_topics_rotate_so_the_writer_covers_the_whole_field(db):
         post(db, client, config, cards.Slot(cards.CORNER, ist(THURSDAY, 14) + timedelta(days=i), "fact"), ask=ask)
         seen.append(next(t for t in cc.TOPICS if f"subject: {t}." in ask.calls[0][0]))
     assert seen == list(cc.TOPICS[:5]) and len(cc.TOPICS) >= 60 and len(set(cc.TOPICS)) == len(cc.TOPICS)
+
+
+def test_models_are_tried_in_order_until_one_answers(db):
+    """Google retires model names and its free models are sometimes busy."""
+    tried = []
+
+    def ask(prompt, api_key, *, model, **options):
+        tried.append(model)
+        if model != "third":
+            raise cc.ContentError(f"the AI writer answered HTTP {503 if model == 'first' else 404}")
+        return GOOD["fact"]
+    client, config = FakeTelegram(), settings(gemini_api_key=KEY, gemini_model="first, second ,third,fourth")
+    result = post(db, client, config, slot(cards.CORNER, "fact", hour=14), ask=ask)
+    assert tried == ["first", "second", "third"] and result.detail == "fact from the ai"
+
+    def all_down(prompt, api_key, *, model, **options):
+        raise cc.ContentError("the AI writer answered HTTP 503")
+    again = post(db, client, config, slot(cards.CORNER, "fact", hour=22), ask=all_down)
+    assert again.outcome == cards.OUTCOME_SENT and again.detail == "fact from the library"
 
 
 def test_only_recent_items_are_remembered(db):
