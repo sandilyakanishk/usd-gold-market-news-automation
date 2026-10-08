@@ -83,38 +83,11 @@ def test_triggers_are_the_schedule_and_a_manual_start():
             break
         if re.fullmatch(r"  [a-z_]+:.*", line):
             triggers.append(line.strip().rstrip(":"))
-    assert triggers == ["schedule", "workflow_dispatch"]
-    for forbidden in ("push:", "pull_request", "workflow_run", "repository_dispatch"):
+    # Started only through the API (by the external timer) or by hand. Nothing a stranger can trigger:
+    # no push, pull-request or fork event, which matters now that the repository is public.
+    assert triggers == ["workflow_dispatch"]
+    for forbidden in ("schedule:", "cron:", "push:", "pull_request", "workflow_run", "repository_dispatch", "issue", "fork"):
         assert forbidden not in "\n".join(lines)
-
-
-def test_schedule_in_india_time():
-    crons = re.findall(r'- cron: "([^"]+)"', workflow_text(PRODUCTION))
-    assert crons == ["15,45 2-19 * * *"]
-    times = india_minutes(crons[0])
-    assert len(times) == 36 == len(set(times))                       # 36 runs a day
-    assert (hhmm(times[0]), hhmm(times[1]), hhmm(times[-1])) == ("07:45", "08:15", "01:15")
-    # Every 30 minutes from 07:45 to 01:15 India time, never on the hour.
-    unwrapped = [t if t >= times[0] else t + 24 * 60 for t in times]
-    assert {b - a for a, b in zip(unwrapped, unwrapped[1:])} == {30}
-    assert all(t % 60 in (15, 45) for t in times)
-    # Forex Factory allows 2 downloads per 5 minutes: runs are never that close together.
-    assert min(b - a for a, b in zip(unwrapped, unwrapped[1:])) >= 5
-
-
-def test_every_window_has_several_scheduled_runs_so_one_dropped_trigger_is_harmless():
-    """GitHub may drop a scheduled run. Each duty must have later runs that would still perform it."""
-    times = india_minutes(re.findall(r'- cron: "([^"]+)"', workflow_text(PRODUCTION))[0])
-    moments = [datetime(2026, 10, 8, t // 60, t % 60, tzinfo=IST) for t in times]
-    morning = [m for m in moments if plan(m).morning]
-    evening = [m for m in moments if plan(m).evening]
-    assert len(morning) >= 10 and len(evening) >= 4
-    assert morning[0].strftime("%H:%M") == "08:15" and evening[0].strftime("%H:%M") == "21:15"
-    # Exactly one run in each window performs the destination check (keeps Whapi requests low).
-    assert [m.strftime("%H:%M") for m in moments if plan(m).check] == ["08:15", "21:15"]
-    # The US release hours (17:30 to 01:30 India time) are polled every half hour.
-    release_window = [m for m in moments if m.hour >= 18 or m.hour < 1]
-    assert len(release_window) >= 14
 
 
 def test_both_workflows_share_one_concurrency_group_and_never_cancel():
@@ -228,7 +201,8 @@ def test_the_plan_step_passes_the_request_and_the_trigger_safely():
 def test_it_refreshes_and_enriches_before_any_send():
     all_steps = steps()
     assert list(all_steps) == [
-        "Check out the repository", "Set up Python", "Install dependencies", "Decide what this run should do",
+        "Check out the repository", "Set up Python", "Install dependencies", "Restore the last calendar download",
+        "Decide what this run should do",
         "Preflight (reports PRESENT or MISSING, never a value)", "WhatsApp destination check (sends nothing)",
         "Refresh the calendar and look up released figures", "Send the morning update",
         "Send today's high-impact alerts", "Send newly released results", "Send tomorrow's reminders",
@@ -318,15 +292,6 @@ def test_workflow_file_is_plain_spaces_with_unix_line_endings():
     assert b"\t" not in raw and b"\r\n" not in raw
 
 
-def test_a_day_of_scheduled_runs_stays_inside_the_free_allowances():
-    """36 runs a day: about 1,100 runner-minutes a month at one minute each, and 4 Whapi check requests a day."""
-    times = india_minutes(re.findall(r'- cron: "([^"]+)"', workflow_text(PRODUCTION))[0])
-    assert len(times) * 31 <= 1200
-    checks = sum(plan(datetime(2026, 10, 8, t // 60, t % 60, tzinfo=IST)).check for t in times)
-    assert checks * 2 * 31 <= 150            # the destination check makes two API requests
-    assert timedelta(minutes=30) == timedelta(minutes=30)
-
-
 # -- Telegram steps ------------------------------------------------------------------------
 
 def test_telegram_sends_mirror_the_whatsapp_ones():
@@ -374,12 +339,47 @@ def test_the_two_channels_are_independent_in_the_workflow():
     assert all("!cancelled()" in t for n, t in all_steps.items() if n.startswith("Telegram:"))
 
 
-def test_externally_triggered_runs_use_few_whapi_requests():
-    """A timer that starts the workflow every 30 minutes, all day, with the default 'auto' input."""
-    moments = [datetime(2026, 10, 8, h, m, tzinfo=IST) for h in range(24) for m in (0, 30)]
-    checks = [mo.strftime("%H:%M") for mo in moments if plan(mo, requested="auto", manual=False).check]
-    assert checks == ["08:30", "21:30"]                    # one per window
-    assert len(checks) * 2 * 31 <= 150                      # two API requests per check, per month
-    # Every 10 minutes changes nothing: still at most three runs fall in each 30-minute check slot.
-    dense = [datetime(2026, 10, 8, h, m, tzinfo=IST) for h in range(24) for m in range(0, 60, 10)]
-    assert sum(plan(mo).check for mo in dense) == 6
+# -- the external timer --------------------------------------------------------------------
+
+def timer(minutes_apart, offset=0):
+    """Moments at which a timer firing every `minutes_apart` minutes, all day, starts a run (India time)."""
+    return [datetime(2026, 10, 8, m // 60, m % 60, tzinfo=IST) for m in range(offset, 24 * 60, minutes_apart)]
+
+
+@pytest.mark.parametrize("minutes_apart, offset", [(10, 0), (10, 5), (10, 8), (30, 0), (30, 15), (15, 7)])
+def test_any_timer_cadence_covers_every_duty(minutes_apart, offset):
+    moments = timer(minutes_apart, offset)
+    morning = [m for m in moments if plan(m).morning]
+    evening = [m for m in moments if plan(m).evening]
+    # Many runs fall in each window, so one missed run never loses a message.
+    assert len(morning) >= 15 and len(evening) >= 5
+    assert _minutes_of(morning[0]) < 8 * 60 + 15 + minutes_apart       # the brief goes out within one interval of 08:15
+    assert _minutes_of(evening[0]) < 21 * 60 + 15 + minutes_apart
+    # The destination check runs at least once and at most three times per window.
+    checks = [m for m in moments if plan(m).check]
+    assert 2 <= len(checks) <= 6
+
+
+def _minutes_of(moment):
+    return moment.hour * 60 + moment.minute
+
+
+def test_a_ten_minute_timer_stays_inside_the_whapi_allowance():
+    """144 runs a day. Only the destination checks and real sends reach Whapi."""
+    moments = timer(10)
+    assert len(moments) == 144
+    checks = sum(plan(m).check for m in moments)
+    assert checks == 6                                    # three per window
+    assert checks * 2 * 31 <= 400                         # two API requests each: well under 1,000 a month
+
+
+def test_the_calendar_download_is_cached_between_runs():
+    """Running every 10 minutes must not mean downloading Forex Factory's export every 10 minutes."""
+    step = steps()["Restore the last calendar download"]
+    assert "uses: actions/cache@v4" in step and "path: data/raw" in step
+    assert "key: ff-feed-${{ github.run_id }}" in step and "ff-feed-" in step.split("restore-keys:")[1]
+    # The cache holds only the public feed file; no step writes anything secret under data/raw.
+    from src.config import Settings
+    assert Settings.from_env().raw_cache_path.parent.name == "raw"
+    names = list(steps())
+    assert names.index("Restore the last calendar download") < names.index("Refresh the calendar and look up released figures")

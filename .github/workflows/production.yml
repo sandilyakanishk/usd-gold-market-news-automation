@@ -2,14 +2,12 @@
 # SENDS REAL WHATSAPP MESSAGES to the Community's Announcements group, and
 # the same messages to the Telegram channel when TELEGRAM_ENABLED is true.
 #
-# GitHub cron is in UTC. India time (Asia/Kolkata) is UTC+5:30 all year.
+# What starts it: an external timer (cron-job.org) calls GitHub's API every
+# 10 minutes, day and night, which starts this workflow with mode "auto".
+# GitHub's own "schedule" trigger is not used: it never fired for this
+# repository.
 #
-#   cron (UTC)            India time
-#   15,45 2-19 * * *      07:45, 08:15, 08:45 ... 00:45, 01:15   (36 runs a day)
-#
-# GitHub does not guarantee that a scheduled run starts on time, or at all.
-# So no job depends on one particular trigger. Every run works out what is
-# due from the India clock (src/runplan.py):
+# Every run works out what is due from the India clock (src/runplan.py):
 #
 #   08:15 - 16:00 India time   daily brief
 #   21:15 - 24:00 India time   tomorrow's reminders
@@ -19,14 +17,12 @@
 # The application never sends the same message twice, so a late run simply
 # catches up and an extra run does nothing.
 #
-# To stop the automation: Actions tab -> "Production" -> "..." -> Disable
-# workflow, or:  gh workflow disable production.yml
+# To stop the automation: disable the job on cron-job.org, or
+# Actions tab -> "Production" -> "..." -> Disable workflow.
 
 name: Production (sends WhatsApp messages)
 
 on:
-  schedule:
-    - cron: "15,45 2-19 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -71,6 +67,17 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
+
+      # Forex Factory refreshes its export about hourly and asks for few
+      # downloads. The last download is kept between runs, so the application
+      # re-downloads at most every 30 minutes however often this workflow runs.
+      - name: Restore the last calendar download
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: ff-feed-${{ github.run_id }}
+          restore-keys: |
+            ff-feed-
 
       - name: Decide what this run should do
         id: plan

@@ -981,15 +981,15 @@ used, and the only trigger is `workflow_dispatch`.
 
 ### The production workflow
 
-`production.yml` runs on a schedule and can also be started by hand. GitHub
-cron is in UTC; India time is UTC+5:30 all year.
+`production.yml` is started every 10 minutes, day and night, by an external
+timer: a free job on cron-job.org that calls GitHub's API
+(`POST .../actions/workflows/production.yml/dispatches` with a token that may
+only start workflows in this repository). It can also be started by hand.
 
-| Cron (UTC) | India time | Runs a day |
-| --- | --- | --- |
-| `15,45 2-19 * * *` | 07:45, 08:15, 08:45 ... 00:45, 01:15 | 36 |
+GitHub's own `schedule` trigger is not used. It never started a single run
+for this repository, which is why the first automatic messages were missed.
+Because the repository is public, the runs use no paid minutes.
 
-GitHub does not guarantee that a scheduled run starts on time, or at all, and
-dropped runs do happen. So no message depends on one particular trigger.
 Every run works out what is due from the India clock (`src/runplan.py`):
 
 | India time | What the run does |
@@ -999,8 +999,11 @@ Every run works out what is due from the India clock (`src/runplan.py`):
 | 21:15 to 24:00 | also sends tomorrow's reminders |
 
 Because the application never sends the same message twice, a run that
-arrives late simply catches up, and the runs after it do nothing. If the
-08:15 run is dropped, the 08:45 run sends the brief instead.
+arrives late simply catches up, and the runs after it do nothing. If one run
+is missed, the next one ten minutes later does its work.
+
+The calendar download is cached between runs, so Forex Factory's export is
+fetched at most every 30 minutes however often the workflow runs.
 
 Each run uses the existing commands, in this order:
 
@@ -1075,13 +1078,14 @@ waiting one is kept.
   starts the run late.
 - Whapi's free Sandbox plan allows 1,000 API requests a month. A day of this
   schedule uses four for the destination checks plus one per message sent.
-- 36 runs a day is roughly 1,100 to 1,500 runner minutes a month, inside the
-  2,000 a private repository gets on GitHub's free plan. Do not shorten the
-  interval without checking that budget.
-- Without a BLS key the BLS limit is 25 requests a day, counted against
-  addresses shared with other GitHub users.
-- Forex Factory allows 2 downloads per 5 minutes, also counted per address.
-  Runs are scheduled 30 minutes apart.
+- At a run every 10 minutes the destination checks use about 12 Whapi
+  requests a day, plus one per message sent.
+- If the repository is ever made private again, a run every 10 minutes would
+  exceed the free minutes of a private repository; go back to every 30.
+- Forex Factory allows 2 downloads per 5 minutes, counted per address; the
+  cached download keeps this to one every 30 minutes.
+- The automation depends on the cron-job.org job and its GitHub token. If the
+  token expires or the job is disabled, runs stop; nothing else warns you.
 
 ### Not built
 
