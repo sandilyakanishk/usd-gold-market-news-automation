@@ -65,6 +65,7 @@ class Settings:
     database_backend: str = "sqlite"  # "sqlite" (local) or "postgres" (production)
     database_url: str | None = None  # PostgreSQL connection string; secret, never logged
     calendar_retention_days: int = 14
+    delivery_retention_days: int = 30  # how long "this was sent" records are kept
     db_connect_timeout_seconds: int = 10
     priority_rules_path: Path = PROJECT_ROOT / "config" / "gold_priority_rules.json"
     actual_mapping_path: Path = PROJECT_ROOT / "config" / "actual_event_mapping.json"
@@ -105,6 +106,7 @@ class Settings:
             database_backend=(env("DATABASE_BACKEND") or "sqlite").strip().lower(),
             database_url=env("DATABASE_URL") or None,
             calendar_retention_days=_retention_days(env("CALENDAR_RETENTION_DAYS") or "14"),
+            delivery_retention_days=_retention_days(env("DELIVERY_RETENTION_DAYS") or "30"),
             db_connect_timeout_seconds=int(env("DB_CONNECT_TIMEOUT_SECONDS") or "10"),
             priority_rules_path=_path(env("GOLD_PRIORITY_RULES") or "config/gold_priority_rules.json"),
             actual_mapping_path=_path(env("ACTUAL_EVENT_MAPPING") or "config/actual_event_mapping.json"),

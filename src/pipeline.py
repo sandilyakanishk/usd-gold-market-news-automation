@@ -122,4 +122,27 @@ def cleanup_old_events(settings: Settings, db: EventRepository, today: date | No
     removed = db.cleanup_old_events(cutoff.isoformat())
     log.info("Retention cleanup: removed %d event(s) dated before %s (retention %d days)",
              removed, cutoff.isoformat(), settings.calendar_retention_days)
+    cleanup_old_deliveries(settings, db)
+    return removed
+
+
+# A market pulse belongs to one half hour that never comes back, so its record is only needed briefly.
+PULSE_RECORD_DAYS = 2
+PULSE_MESSAGE_TYPE = "MARKET_PULSE"
+
+
+def cleanup_old_deliveries(settings: Settings, db: EventRepository, now: datetime | None = None) -> int:
+    """Delete "this was sent" records that can no longer prevent a duplicate. Returns how many were removed.
+
+    A record must outlive whatever could make the same message come up again:
+    events are kept for calendar_retention_days and videos are forwarded only
+    while they are a few days old, so the general window is never shorter
+    than the calendar's plus one day.
+    """
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    days = max(settings.delivery_retention_days, settings.calendar_retention_days + 1)
+    stamp = "%Y-%m-%dT%H:%M:%SZ"
+    removed = db.cleanup_old_deliveries((now - timedelta(days=PULSE_RECORD_DAYS)).strftime(stamp), only_type=PULSE_MESSAGE_TYPE)
+    removed += db.cleanup_old_deliveries((now - timedelta(days=days)).strftime(stamp), except_type=PULSE_MESSAGE_TYPE)
+    log.info("Retention cleanup: removed %d delivery record(s) (pulse %d days, others %d days)", removed, PULSE_RECORD_DAYS, days)
     return removed

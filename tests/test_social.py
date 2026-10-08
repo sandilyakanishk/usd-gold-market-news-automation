@@ -8,9 +8,10 @@ import pytest
 from src import social
 from src.database.database import SQLiteRepository
 from src.delivery.models import OUTCOME_ALREADY_SENT, OUTCOME_DRY_RUN, OUTCOME_FAILED, OUTCOME_SENT, PROVIDER_TELEGRAM
-from src.delivery.telegram import TelegramClient, TelegramDestinationError, TelegramError, TelegramMessageError
+from src.delivery.telegram import TelegramClient, TelegramDestinationError, TelegramMessageError
 
 CHAT = "@example_channel"
+NOW = datetime(2026, 10, 8, 16, 0, tzinfo=timezone.utc)
 CHANNEL = "UC" + "a" * 22
 SETTINGS = SimpleNamespace(instagram_profile_url=None, youtube_channel_id=CHANNEL, youtube_forward="shorts", video_posts_since="2026-10-08T00:00:00Z",
                            request_timeout_seconds=5, user_agent="test-agent")
@@ -40,16 +41,25 @@ def feed(*entries):
             + "".join(entries) + "\n</feed>")
 
 
+MISSING_IMAGES = set()  # cover addresses that have no image (yet)
+
+
+@pytest.fixture(autouse=True)
+def fake_image_download(monkeypatch):
+    """No test downloads anything: a cover's "bytes" are simply its address, so tests can see which one was used."""
+    MISSING_IMAGES.clear()
+    monkeypatch.setattr(social, "download_image", lambda url, **_: None if url in MISSING_IMAGES else url.encode())
+
+
 class FakeTelegram:
     def __init__(self, photo_error=None, bad_images=()):
-        self.photos, self.texts, self.photo_error, self.bad_images = [], [], photo_error, set(bad_images)
+        self.photos, self.texts, self.photo_error = [], [], photo_error
+        MISSING_IMAGES.update(bad_images)
 
-    def send_photo(self, chat_id, photo_url, caption):
+    def send_photo_bytes(self, chat_id, image, caption):
         if self.photo_error is not None:
             raise self.photo_error
-        if photo_url in self.bad_images:
-            raise TelegramError("Telegram answered 400: Bad Request: failed to get HTTP URL content")
-        self.photos.append((chat_id, photo_url, caption))
+        self.photos.append((chat_id, image.decode(), caption))
         return str(200 + len(self.photos))
 
     def send_text(self, chat_id, text, *, markdown=True, link_preview=False):
@@ -86,8 +96,10 @@ def test_parse_feed_reads_what_is_needed():
     assert (short.video_id, short.title, short.is_short) == ("AbCdEfGhIjK", "Gold breaks a key level #xauusd", True)
     assert short.link == "https://www.youtube.com/shorts/AbCdEfGhIjK"
     assert short.published == datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
-    assert short.images == ["https://i.ytimg.com/vi/AbCdEfGhIjK/oar2.jpg", "https://i1.ytimg.com/vi/AbCdEfGhIjK/hqdefault.jpg"]
-    assert long_video.is_short is False and long_video.images == ["https://i1.ytimg.com/vi/LoNgViDeO12/hqdefault.jpg"]
+    assert short.images == [
+        "https://i.ytimg.com/vi/AbCdEfGhIjK/oar2.jpg", "https://i.ytimg.com/vi/AbCdEfGhIjK/maxresdefault.jpg",
+        "https://i.ytimg.com/vi/AbCdEfGhIjK/hq720.jpg", "https://i1.ytimg.com/vi/AbCdEfGhIjK/hqdefault.jpg"]
+    assert long_video.is_short is False and long_video.images[0] == "https://i.ytimg.com/vi/LoNgViDeO12/maxresdefault.jpg"
     assert short.message_key == "VIDEO_YT_AbCdEfGhIjK"
 
 
@@ -109,8 +121,8 @@ def test_fetch_refuses_anything_that_is_not_a_channel_id():
 def test_only_new_shorts_are_selected_oldest_first():
     videos = social.parse_feed(feed(NEW_LONG, entry("ZzLater12345", "Later reel", "2026-10-08T15:00:00+00:00"), OLD_SHORT, NEW_SHORT))
     since = social.parse_since("2026-10-08T00:00:00Z")
-    assert [v.video_id for v in social.select_new(videos, since=since)] == ["AbCdEfGhIjK", "ZzLater12345"]
-    assert [v.video_id for v in social.select_new(videos, since=since, kinds=social.ALL)] == ["AbCdEfGhIjK", "LoNgViDeO12", "ZzLater12345"]
+    assert [v.video_id for v in social.select_new(videos, since=since, now=NOW)] == ["AbCdEfGhIjK", "ZzLater12345"]
+    assert [v.video_id for v in social.select_new(videos, since=since, kinds=social.ALL, now=NOW)] == ["AbCdEfGhIjK", "LoNgViDeO12", "ZzLater12345"]
     with pytest.raises(ValueError):
         social.parse_since("last week")
 
@@ -158,7 +170,7 @@ def test_profile_address_is_cleaned_of_tracking_and_checked(given, expected):
 def test_the_configured_profile_reaches_the_post(db):
     client = FakeTelegram()
     settings = SimpleNamespace(**{**vars(SETTINGS), "instagram_profile_url": "https://www.instagram.com/example.handle?stkn=abc"})
-    social.send_new_videos(db, client, settings, CHAT, fetch=fetcher(feed(NEW_SHORT)))
+    social.send_new_videos(db, client, settings, CHAT, fetch=fetcher(feed(NEW_SHORT)), now=NOW)
     assert client.photos[0][2].endswith("\n📸 Instagram: https://www.instagram.com/example.handle")
     assert "stkn" not in client.photos[0][2]
 
@@ -167,8 +179,8 @@ def test_the_configured_profile_reaches_the_post(db):
 
 def test_a_new_short_is_posted_once_with_its_upright_cover(db):
     client, fetch = FakeTelegram(), fetcher(feed(OLD_SHORT, NEW_LONG, NEW_SHORT))
-    first = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetch)
-    second = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetch)
+    first = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetch, now=NOW)
+    second = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetch, now=NOW)
     assert [(v.video_id, r.outcome) for v, r, _ in first] == [("AbCdEfGhIjK", OUTCOME_SENT)]
     assert [r.outcome for _, r, _ in second] == [OUTCOME_ALREADY_SENT]
     assert len(client.photos) == 1 and client.texts == []
@@ -181,44 +193,70 @@ def test_a_new_short_is_posted_once_with_its_upright_cover(db):
 
 def test_old_uploads_are_never_forwarded(db):
     client = FakeTelegram()
-    assert social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(OLD_SHORT))) == []
+    assert social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(OLD_SHORT)), now=NOW) == []
     assert client.photos == [] and db.count_deliveries() == 0
 
 
 def test_cover_image_falls_back_to_the_feed_thumbnail_then_to_a_link_post(db):
     client = FakeTelegram(bad_images=["https://i.ytimg.com/vi/AbCdEfGhIjK/oar2.jpg"])
-    social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)))
-    assert [p[1] for p in client.photos] == ["https://i1.ytimg.com/vi/AbCdEfGhIjK/hqdefault.jpg"]
+    social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)), now=NOW)
+    assert [p[1] for p in client.photos] == ["https://i.ytimg.com/vi/AbCdEfGhIjK/maxresdefault.jpg"]
 
     with SQLiteRepository(":memory:") as other:
         plain = FakeTelegram(photo_error=TelegramMessageError("Telegram answered 400: wrong file identifier/HTTP URL specified"))
-        results = social.send_new_videos(other, plain, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)))
+        results = social.send_new_videos(other, plain, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)), now=NOW)
         assert results[0][1].outcome == OUTCOME_SENT and plain.photos == []
         chat, text, markdown, link_preview = plain.texts[0]
         assert "https://www.youtube.com/shorts/AbCdEfGhIjK" in text and markdown is False and link_preview is True
 
 
+def test_a_fresh_video_waits_for_its_cover_instead_of_posting_without_one(db):
+    """The Short that was forwarded seconds after upload had no cover yet and went out as a bare link."""
+    just_published = entry("FreshVid123", "Brand new reel", "2026-10-08T15:58:00+00:00")
+    covers = social.parse_feed(feed(just_published))[0].images
+    client = FakeTelegram(bad_images=covers)                        # no cover exists yet
+    first = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(just_published)), now=NOW)
+    assert first[0][1].outcome == OUTCOME_FAILED and "not ready yet" in first[0][1].error
+    assert client.photos == [] and client.texts == []               # nothing was posted
+
+    MISSING_IMAGES.discard(covers[0])                                # ten minutes later the cover is there
+    later = NOW.replace(minute=10)
+    second = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(just_published)), now=later)
+    assert second[0][1].outcome == OUTCOME_SENT and [p[1] for p in client.photos] == [covers[0]] and client.texts == []
+
+
+def test_a_video_whose_cover_never_appears_is_still_posted_as_a_link_after_the_wait(db):
+    just_published = entry("FreshVid123", "Brand new reel", "2026-10-08T15:58:00+00:00")
+    client = FakeTelegram(bad_images=social.parse_feed(feed(just_published))[0].images)
+    for minute, expected in ((10, OUTCOME_FAILED), (40, OUTCOME_FAILED)):
+        result = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(just_published)), now=NOW.replace(minute=minute))
+        assert result[0][1].outcome == expected and client.texts == []
+    late = NOW.replace(hour=16, minute=50)
+    assert social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(just_published)), now=late)[0][1].outcome == OUTCOME_SENT
+    assert client.photos == [] and client.texts[0][3] is True       # link preview on
+
+
 def test_a_real_delivery_problem_is_recorded_and_retried_not_hidden(db):
     broken = FakeTelegram(photo_error=TelegramDestinationError("Telegram answered 403: bot is not a member"))
-    failed = social.send_new_videos(db, broken, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)))
+    failed = social.send_new_videos(db, broken, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)), now=NOW)
     assert failed[0][1].outcome == OUTCOME_FAILED and broken.texts == []
     client = FakeTelegram()
-    assert social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)))[0][1].outcome == OUTCOME_SENT
+    assert social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)), now=NOW)[0][1].outcome == OUTCOME_SENT
     assert len(client.photos) == 1
 
 
 def test_many_new_videos_are_spread_over_runs(db):
     entries = [entry(f"Video{i:06d}", f"Reel {i}", f"2026-10-08T12:{i:02d}:00+00:00") for i in range(5)]
     client, fetch = FakeTelegram(), fetcher(feed(*entries))
-    first = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetch)
+    first = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetch, now=NOW)
     assert [v.title for v, r, _ in first if r.outcome == OUTCOME_SENT] == ["Reel 0", "Reel 1", "Reel 2"]
-    second = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetch)
+    second = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetch, now=NOW)
     assert [v.title for v, r, _ in second if r.outcome == OUTCOME_SENT] == ["Reel 3", "Reel 4"]
     assert len(client.photos) == 5
 
 
 def test_dry_run_sends_and_stores_nothing(db):
-    results = social.send_new_videos(db, None, SETTINGS, CHAT, dry_run=True, fetch=fetcher(feed(NEW_SHORT)))
+    results = social.send_new_videos(db, None, SETTINGS, CHAT, dry_run=True, fetch=fetcher(feed(NEW_SHORT)), now=NOW)
     assert results[0][1].outcome == OUTCOME_DRY_RUN and "NEW REEL" in results[0][2]
     assert db.count_deliveries() == 0
 
@@ -237,6 +275,62 @@ def test_send_photo_posts_the_image_address_and_plain_caption(monkeypatch):
             client.send_photo(*bad)
 
 
+def test_send_photo_bytes_uploads_the_image_itself(monkeypatch):
+    client = TelegramClient("123:TEST")
+    calls = []
+    monkeypatch.setattr(client, "_request", lambda method, data, content_type: calls.append((method, data, content_type)) or {"message_id": 88})
+    image = b"\xff\xd8" + b"\x00\x01binary\r\n--data" * 10
+    assert client.send_photo_bytes(CHAT, image, "🎬 caption") == "88"
+    method, body, content_type = calls[0]
+    assert method == "sendPhoto" and content_type.startswith("multipart/form-data; boundary=")
+    boundary = content_type.split("boundary=")[1].encode()
+    assert body.count(b"--" + boundary) == 4 and body.endswith(b"--" + boundary + b"--\r\n")
+    assert image in body and "🎬 caption".encode("utf-8") in body and CHAT.encode() in body
+    assert b'name="photo"; filename="cover.jpg"' in body and b"Content-Type: image/jpeg" in body
+    for bad in ((CHAT, b"", "c"), (CHAT, image, " "), (CHAT, image, "x" * 1025), (CHAT, b"x" * (10 * 1024 * 1024 + 1), "c")):
+        with pytest.raises(TelegramMessageError):
+            client.send_photo_bytes(*bad)
+
+
+class _Reply:
+    def __init__(self, data, kind):
+        self._data, self.headers = data, {"Content-Type": kind}
+
+    def read(self, limit=-1):
+        return self._data[:limit] if limit and limit > 0 else self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_download_image_accepts_only_a_real_youtube_cover(monkeypatch):
+    monkeypatch.undo()                                              # use the real function, with a fake network
+    jpeg = b"\xff\xd8" + b"x" * 20_000
+    replies = {"good": _Reply(jpeg, "image/jpeg"), "tiny": _Reply(b"\xff\xd8" + b"x" * 900, "image/jpeg"),
+               "html": _Reply(b"<html>" * 5000, "text/html"), "notjpeg": _Reply(b"GIF89a" + b"x" * 20_000, "image/jpeg")}
+    current = {}
+    monkeypatch.setattr(social.urllib.request, "urlopen", lambda request, timeout=0: replies[current["case"]])
+    url = "https://i.ytimg.com/vi/AbCdEfGhIjK/oar2.jpg"
+    results = {}
+    for case in replies:
+        current["case"] = case
+        results[case] = social.download_image(url)
+    assert results == {"good": jpeg, "tiny": None, "html": None, "notjpeg": None}
+    # Only YouTube's image hosts are ever contacted.
+    current["case"] = "good"
+    for other in ("https://evil.example/vi/AbCdEfGhIjK/oar2.jpg", "http://i.ytimg.com/vi/AbCdEfGhIjK/oar2.jpg",
+                  "https://i.ytimg.com/vi/../../etc/passwd.jpg", "", None):
+        assert social.download_image(other) is None
+
+    def unreachable(request, timeout=0):
+        raise OSError("network down")
+    monkeypatch.setattr(social.urllib.request, "urlopen", unreachable)
+    assert social.download_image(url) is None
+
+
 def test_link_preview_is_off_unless_asked_for(monkeypatch):
     client = TelegramClient("123:TEST")
     calls = []
@@ -247,6 +341,17 @@ def test_link_preview_is_off_unless_asked_for(monkeypatch):
 
 
 # -- command line --------------------------------------------------------------------------
+
+def test_a_video_older_than_a_week_is_never_forwarded_even_if_its_record_is_gone(db):
+    """Delivery records are deleted after a while; an old video still in the feed must not be posted again."""
+    client = FakeTelegram()
+    weeks_later = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+    assert db.count_deliveries() == 0                                # as if the record had been cleaned up
+    assert social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)), now=weeks_later) == []
+    assert client.photos == []
+    six_days = datetime(2026, 10, 14, 11, 0, tzinfo=timezone.utc)
+    assert len(social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)), now=six_days)) == 1
+
 
 def _cli_env(monkeypatch, tmp_path, channel=CHANNEL):
     monkeypatch.setenv("DATABASE_BACKEND", "sqlite")

@@ -415,6 +415,16 @@ class EventRepository(ABC):
         rows = self._read(f"{_D_SELECT} ORDER BY updated_at DESC, message_key LIMIT {int(limit)}")
         return [self._decode_delivery(r) for r in rows]
 
+    def cleanup_old_deliveries(self, cutoff: str, *, only_type: str | None = None, except_type: str | None = None) -> int:
+        """Delete delivery records last touched before `cutoff` (ISO UTC instant). Returns the count."""
+        sql, params = f"DELETE FROM {DELIVERIES_TABLE} WHERE updated_at < ?", [self._timestamp_param(cutoff)]
+        if only_type is not None:
+            sql, params = sql + " AND message_type = ?", params + [only_type]
+        if except_type is not None:
+            sql, params = sql + " AND message_type <> ?", params + [except_type]
+        with self._transaction():
+            return self._write(sql, params)
+
     def count_deliveries(self) -> int:
         return self._read(f"SELECT COUNT(*) AS n FROM {DELIVERIES_TABLE}")[0]["n"]
 

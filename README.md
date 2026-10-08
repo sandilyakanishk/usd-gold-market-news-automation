@@ -982,9 +982,11 @@ python -m src.main --telegram-send-videos             # post new videos
   if set, adds the owner's Instagram profile link under the YouTube link.
 - **Once per video.** The video id is the message identity
   (`VIDEO_YT_<id>`), recorded in `message_deliveries`.
-- **Cover image.** A Short's upright cover is tried first, then the feed's
-  thumbnail. If Telegram accepts neither, the caption is sent as a normal
-  message with link preview on.
+- **Cover image.** The bot downloads the cover from YouTube's image host and
+  uploads it to Telegram (a Short's upright cover first, then the wide ones).
+  A video published moments ago may not have a cover yet; it is then posted
+  on a later run, once the cover exists. Only if there is still none after
+  45 minutes is the caption sent as a normal message with link preview on.
 - **At most three posts per run**; any further new videos follow on the next
   runs.
 - **In the cloud** the step runs only when the repository variable
@@ -1306,6 +1308,21 @@ or keep its own copy of the event details.
 Events dated more than `CALENDAR_RETENTION_DAYS` days before today are
 deleted, where "today" is the current date in `DISPLAY_TIMEZONE`. With the
 default of 14, a run on 8 October keeps everything from 24 September onward.
+
+The same cleanup keeps the other tables small, so the database does not grow
+without limit:
+
+| Data | Kept for |
+|---|---|
+| calendar events, their classifications and actuals | `CALENDAR_RETENTION_DAYS` (14) |
+| "this was sent" records of market pulses | 2 days |
+| all other "this was sent" records | `DELIVERY_RETENTION_DAYS` (30), never less than the calendar's plus one day |
+| posted gold prices | 14 days |
+
+A delivery record is what stops a message being sent twice, so it is only
+deleted once the message can no longer come up again: events are gone by
+then, a pulse's half hour never returns, and videos older than 7 days are
+never forwarded.
 
 Cleanup runs automatically at the end of every successful sync, and on demand:
 

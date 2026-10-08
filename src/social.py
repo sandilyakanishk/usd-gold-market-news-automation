@@ -19,7 +19,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .config import Settings
 from .database.base import EventRepository
@@ -40,6 +40,12 @@ CAPTION_LIMIT = 1024  # Telegram's limit for the text under a photo
 # A safety limit: if many videos appear at once, the rest follow on the next runs.
 MAX_POSTS_PER_RUN = 3
 SHORTS, ALL = "shorts", "all"
+# Far shorter than the time delivery records are kept (see pipeline.cleanup_old_deliveries).
+FORWARD_MAX_AGE = timedelta(days=7)
+# How long a new video may wait for its cover image before it is posted without one.
+COVER_WAIT = timedelta(minutes=45)
+MIN_IMAGE_BYTES, MAX_IMAGE_BYTES = 5_000, 10 * 1024 * 1024
+_IMAGE_URL = re.compile(r"^https://i\d?\.ytimg\.com/vi/[A-Za-z0-9_-]{6,20}/[a-z0-9]+\.jpg$")
 _CHANNEL_ID = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{6,20}$")
 _INSTAGRAM_PROFILE = re.compile(r"^https://(?:www\.)?instagram\.com/([A-Za-z0-9._]{1,30})/?(?:\?.*)?$")
@@ -68,7 +74,9 @@ class Video:
     @property
     def images(self) -> list[str]:
         """Cover images to try, best first. A Short has an upright cover of its own."""
-        urls = [f"https://i.ytimg.com/vi/{self.video_id}/oar2.jpg"] if self.is_short else []
+        base = f"https://i.ytimg.com/vi/{self.video_id}"
+        urls = [f"{base}/oar2.jpg"] if self.is_short else []
+        urls += [f"{base}/maxresdefault.jpg", f"{base}/hq720.jpg"]
         return urls + ([self.thumbnail] if self.thumbnail else [])
 
 
@@ -128,8 +136,15 @@ def parse_since(value: str) -> datetime:
     return (moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
 
 
-def select_new(videos: list[Video], *, since: datetime, kinds: str = SHORTS) -> list[Video]:
-    """Videos to forward, oldest first."""
+def select_new(videos: list[Video], *, since: datetime, kinds: str = SHORTS, now: datetime | None = None) -> list[Video]:
+    """Videos to forward, oldest first.
+
+    Only recent uploads count: the record that a video was posted is deleted
+    after a while, and an old video still listed in the feed must not be
+    posted a second time once that record is gone.
+    """
+    now = now or datetime.now(timezone.utc)
+    since = max(since, now - FORWARD_MAX_AGE)
     wanted = [v for v in videos if v.published >= since and (kinds == ALL or v.is_short)]
     return sorted(wanted, key=lambda v: (v.published, v.video_id))
 
@@ -157,42 +172,74 @@ def build_caption(video: Video, instagram_url: str | None = None) -> str:
     return "\n\n".join(part for part in (header, body, footer) if part)
 
 
-class _PhotoPost:
-    """Lets the delivery service post a photo with a caption, falling back to a plain link post.
+def download_image(url: str, *, timeout: int = 20, user_agent: str = "") -> bytes | None:
+    """The cover image at `url`, or None if it is missing, not ready yet, or not a usable JPEG."""
+    if not _IMAGE_URL.match(url or ""):
+        return None
+    request = urllib.request.Request(url, headers={"User-Agent": user_agent})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            kind = (response.headers.get("Content-Type") or "").lower()
+            data = response.read(MAX_IMAGE_BYTES + 1)
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+    # YouTube answers a tiny grey placeholder while a cover is still being made.
+    if not kind.startswith("image/jpeg") or not (MIN_IMAGE_BYTES <= len(data) <= MAX_IMAGE_BYTES) or data[:2] != b"\xff\xd8":
+        return None
+    return data
 
-    If Telegram cannot fetch any cover image, the caption is sent as an
-    ordinary message with link preview on, so the video still shows a preview.
+
+class CoverNotReady(TelegramError):
+    """A new video has no cover image yet. The post is made on a later run."""
+
+
+class _PhotoPost:
+    """Lets the delivery service post a photo with a caption.
+
+    The cover is downloaded here and uploaded to Telegram. A freshly published
+    video whose cover is not ready is left for the next run. Only for a video
+    that still has no usable cover after COVER_WAIT is the caption sent as an
+    ordinary message, with link preview on.
     """
 
-    def __init__(self, client: TelegramClient, images: list[str]):
-        self._client, self._images = client, images
+    def __init__(self, client: TelegramClient, video: Video, *, now: datetime, download):
+        self._client, self._video, self._now, self._download = client, video, now, download
 
     def send_text(self, chat_id: str, text: str, **_: object) -> str:
-        for url in self._images:
+        for url in self._video.images:
+            image = self._download(url)
+            if image is None:
+                continue
             try:
-                return self._client.send_photo(chat_id, url, text)
+                return self._client.send_photo_bytes(chat_id, image, text)
             except (TelegramAuthError, TelegramDestinationError, TelegramNetworkError):
                 raise
             except TelegramError as exc:
                 log.warning("Telegram did not accept a cover image (%s); trying the next option.", exc)
+        if self._now - self._video.published < COVER_WAIT:
+            raise CoverNotReady("The video's cover image is not ready yet. It is posted on a later run.")
         return self._client.send_text(chat_id, text, markdown=False, link_preview=True)
 
 
 # -- sending --------------------------------------------------------------------------------
 
 def send_new_videos(db: EventRepository, client: TelegramClient | None, settings: Settings, chat_id: str, *,
-                    dry_run: bool = False, now: datetime | None = None, fetch=fetch_feed,
+                    dry_run: bool = False, now: datetime | None = None, fetch=fetch_feed, download=None,
                     ) -> list[tuple[Video, DeliveryResult, str]]:
     """Post every new video once. Returns (video, result, caption) for each one considered."""
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    if download is None:
+        def download(url: str) -> bytes | None:
+            return download_image(url, timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
     videos = fetch(settings.youtube_channel_id, timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
-    new = select_new(videos, since=parse_since(settings.video_posts_since), kinds=settings.youtube_forward)
+    new = select_new(videos, since=parse_since(settings.video_posts_since), kinds=settings.youtube_forward, now=now)
     results, posted = [], 0
     for video in new:
         caption = build_caption(video, clean_profile_url(settings.instagram_profile_url))
         if posted >= MAX_POSTS_PER_RUN and db.get_delivery(video.message_key, PROVIDER_TELEGRAM, chat_id) is None:
             continue  # the next run picks it up
         result = deliver_text(
-            db, None if client is None else _PhotoPost(client, video.images),
+            db, None if client is None else _PhotoPost(client, video, now=now, download=download),
             message_key=video.message_key, message_type=MESSAGE_TYPE, text=caption, chat_id=chat_id, dry_run=dry_run,
             now=now, provider=PROVIDER_TELEGRAM, destination=DESTINATION_TELEGRAM_CHANNEL, label=describe_chat(chat_id))
         if result.outcome in (OUTCOME_SENT, OUTCOME_FAILED, OUTCOME_DRY_RUN):
@@ -203,5 +250,5 @@ def send_new_videos(db: EventRepository, client: TelegramClient | None, settings
 
 __all__ = [
     "ALL", "MAX_POSTS_PER_RUN", "MESSAGE_TYPE", "OUTCOME_ALREADY_SENT", "SHORTS", "Video", "VideoFeedError",
-    "build_caption", "clean_profile_url", "fetch_feed", "parse_feed", "parse_since", "select_new", "send_new_videos",
+    "CoverNotReady", "build_caption", "clean_profile_url", "download_image", "fetch_feed", "parse_feed", "parse_since", "select_new", "send_new_videos",
 ]

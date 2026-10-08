@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 import urllib.error
 import urllib.request
 
@@ -20,6 +21,7 @@ DEFAULT_BASE_URL = "https://api.telegram.org"
 USER_AGENT = "usd-gold-calendar-collector/0.1 (personal, low-frequency)"
 MAX_TEXT_LENGTH = 4096
 MAX_CAPTION_LENGTH = 1024
+MAX_PHOTO_BYTES = 10 * 1024 * 1024
 # Telegram's simple Markdown reads *bold* and _italic_ the same way WhatsApp does.
 PARSE_MODE = "Markdown"
 
@@ -69,10 +71,12 @@ class TelegramClient:
 
     def _call(self, method: str, payload: dict | None = None) -> dict | list | bool | int:
         """Call one Bot API method and return its `result`."""
-        data = json.dumps(payload or {}, ensure_ascii=False).encode("utf-8")
+        return self._request(method, json.dumps(payload or {}, ensure_ascii=False).encode("utf-8"), "application/json")
+
+    def _request(self, method: str, data: bytes, content_type: str) -> dict | list | bool | int:
         request = urllib.request.Request(
             f"{self._base}/bot{self._token}/{method}", data=data, method="POST",
-            headers={"Content-Type": "application/json", "User-Agent": USER_AGENT})
+            headers={"Content-Type": content_type, "User-Agent": USER_AGENT})
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
                 body = response.read().decode("utf-8", errors="replace")
@@ -177,6 +181,32 @@ class TelegramClient:
         if len(caption) > MAX_CAPTION_LENGTH:
             raise TelegramMessageError(f"The caption is {len(caption)} characters long; the limit is {MAX_CAPTION_LENGTH}.")
         result = self._call("sendPhoto", {"chat_id": chat_id, "photo": photo_url, "caption": caption})
+        message_id = result.get("message_id") if isinstance(result, dict) else None
+        if message_id is None:
+            raise TelegramError("Telegram did not confirm the message: no message id was returned.")
+        log.info("Telegram: photo accepted for %s (id %s)", describe_chat(chat_id), message_id)
+        return str(message_id)
+
+    def send_photo_bytes(self, chat_id: str, image: bytes, caption: str, *, filename: str = "cover.jpg") -> str:
+        """Upload `image` and post it with `caption` under it, as plain text. Returns Telegram's message id."""
+        if not chat_id or not str(chat_id).strip():
+            raise TelegramConfigError("TELEGRAM_CHAT_ID is not set. Add it to the environment or to .env.")
+        if not isinstance(image, (bytes, bytearray)) or not image:
+            raise TelegramMessageError("There is no image to send.")
+        if len(image) > MAX_PHOTO_BYTES:
+            raise TelegramMessageError(f"The image is {len(image)} bytes; the limit is {MAX_PHOTO_BYTES}.")
+        if not isinstance(caption, str) or not caption.strip():
+            raise TelegramMessageError("The message has no text.")
+        if len(caption) > MAX_CAPTION_LENGTH:
+            raise TelegramMessageError(f"The caption is {len(caption)} characters long; the limit is {MAX_CAPTION_LENGTH}.")
+        boundary = f"----pulse{uuid.uuid4().hex}"
+        parts = []
+        for name, value in (("chat_id", str(chat_id)), ("caption", caption)):
+            parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode("utf-8"))
+        parts.append((f'--{boundary}\r\nContent-Disposition: form-data; name="photo"; filename="{filename}"\r\n'
+                      "Content-Type: image/jpeg\r\n\r\n").encode("utf-8") + bytes(image) + b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+        result = self._request("sendPhoto", b"".join(parts), f"multipart/form-data; boundary={boundary}")
         message_id = result.get("message_id") if isinstance(result, dict) else None
         if message_id is None:
             raise TelegramError("Telegram did not confirm the message: no message id was returned.")
