@@ -124,7 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     tg.add_argument("--telegram-send-videos", action="store_true",
                     help="forward new YouTube Shorts from YOUTUBE_CHANNEL_ID (cover image, caption and link)")
     tg.add_argument("--telegram-send-live", action="store_true",
-                    help="post an alert if the YouTube channel is live right now (needs YOUTUBE_API_KEY)")
+                    help="post an alert if the YouTube channel is live right now")
     tg.add_argument("--telegram-send-pulse", action="store_true",
                     help="send the half-hourly market pulse (gold price and next high-impact USD event)")
 
@@ -572,10 +572,9 @@ def run_telegram_videos(args: argparse.Namespace, settings: Settings, today: dat
 
 def run_telegram_live(args: argparse.Namespace, settings: Settings, today: date) -> int:
     """Post an alert for a YouTube broadcast that is on air. Telegram only."""
-    for name, value in (("YOUTUBE_CHANNEL_ID", settings.youtube_channel_id), ("YOUTUBE_API_KEY", settings.youtube_api_key)):
-        if not value:
-            print(f"{name} is not set. The live check was skipped.")
-            return 0
+    if not settings.youtube_channel_id:
+        print("YOUTUBE_CHANNEL_ID is not set. The live check was skipped.")
+        return 0
     chat_id = telegram_chat_id(settings)
     client = None if args.dry_run else build_telegram_client(settings)
     with open_database(settings) as db:

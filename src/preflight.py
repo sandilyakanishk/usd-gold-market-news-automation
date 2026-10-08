@@ -29,7 +29,7 @@ VARIABLES = (
     ("BLS_API_KEY", "optional BLS key (raises the daily request limit)", False),
     ("TELEGRAM_BOT_TOKEN", "optional: Telegram bot token, for posting to a channel", False),
     ("TELEGRAM_CHAT_ID", "optional: Telegram channel the bot posts to", False),
-    ("YOUTUBE_API_KEY", "optional: YouTube Data API key, for the live alert", False),
+    ("YOUTUBE_API_KEY", "optional: YouTube Data API key; the live alert also works without one", False),
 )
 
 

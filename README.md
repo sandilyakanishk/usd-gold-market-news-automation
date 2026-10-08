@@ -1016,16 +1016,22 @@ python -m src.main --telegram-send-live --dry-run   # show the alert if live, se
 python -m src.main --telegram-send-live             # post it
 ```
 
-- **How it knows.** YouTube's official Data API: the channel's ten newest
-  videos are looked up and one whose status is `live` is a broadcast on air.
-  Scheduled ("upcoming") and finished streams are ignored. This needs a free
-  API key, `YOUTUBE_API_KEY`, sent as a request header and never logged.
+- **How it knows, without a key.** One request to the channel's public page
+  `youtube.com/channel/<id>/live`. When nothing is on, that page is the
+  channel itself; when a broadcast is on air it is the stream's watch page.
+  A stream that is only scheduled is recognised and ignored. Nothing needs
+  setting up, but this reads a web page rather than an official interface:
+  if YouTube changes the page, or answers the runner with a consent or check
+  page, the step reports "did not look as expected" instead of guessing.
+- **Optionally, with a key.** If `YOUTUBE_API_KEY` is set, YouTube's official
+  Data API is used instead (the channel's ten newest videos are looked up;
+  two units per check, 2,880 a day of the free 10,000). The key is sent as a
+  request header and never logged.
 - **Once per stream.** The broadcast's video id is the message identity
   (`LIVE_YT_<id>`).
 - **Speed.** `.github/workflows/live-check.yml` is started every minute by a
   second cron-job.org job, so the alert follows the start of a stream by
   about one to three minutes.
-- **Quota.** Two API units per check, 2,880 a day of the free 10,000.
 - **Cover.** The stream's cover is uploaded with the alert if YouTube has
   one at that moment; otherwise the alert goes out at once as a link post.
 

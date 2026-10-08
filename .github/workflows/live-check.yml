@@ -13,7 +13,8 @@
 # keeps two live checks from running at once.
 #
 # It runs only when the repository variables TELEGRAM_ENABLED (true) and
-# YOUTUBE_CHANNEL_ID are set and the YOUTUBE_API_KEY secret exists.
+# YOUTUBE_CHANNEL_ID are set. No API key is needed: without the optional
+# YOUTUBE_API_KEY secret the channel's public live page is read instead.
 #
 # To stop it: disable the job on cron-job.org, or
 # Actions tab -> "Live check" -> "..." -> Disable workflow.

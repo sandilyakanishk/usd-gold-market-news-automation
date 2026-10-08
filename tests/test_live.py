@@ -147,6 +147,85 @@ class _ctx:
         return False
 
 
+# -- without a key: the public live page ---------------------------------------------------
+
+def page(canonical, *markers, title="🔴 LIVE FOREX TRADING | XAUUSD &amp; GOLD"):
+    return (f'<html><head><meta name="title" content="{title}">'
+            f'<link rel="canonical" href="https://www.youtube.com/{canonical}"></head><body><script>var ytInitialPlayerResponse = {{'
+            + ",".join(markers) + "};</script></body></html>")
+
+
+ON_AIR = page("watch?v=LiveNow1234", '"playabilityStatus":{"status":"OK"}', '"isLive":true', '"isLiveContent":true')
+SCHEDULED = page("watch?v=Upcoming123", '"playabilityStatus":{"status":"LIVE_STREAM_OFFLINE"}', '"isUpcoming":true', '"isLiveContent":true')
+NOTHING_ON = page("channel/" + CHANNEL)
+REPLAY = page("watch?v=Finished123", '"playabilityStatus":{"status":"OK"}', '"isLiveContent":true')
+
+
+def test_the_live_page_tells_on_air_from_scheduled_from_nothing():
+    streams = live.parse_live_page(ON_AIR)
+    assert [(s.video_id, s.title) for s in streams] == [("LiveNow1234", "🔴 LIVE FOREX TRADING | XAUUSD & GOLD")]
+    assert live.parse_live_page(SCHEDULED) == []
+    assert live.parse_live_page(NOTHING_ON) == []
+    assert live.parse_live_page(REPLAY) == []
+    # A scheduled stream never counts, whatever else the page says.
+    assert live.parse_live_page(page("watch?v=Upcoming123", '"isLive":true', '"isUpcoming":true')) == []
+
+
+@pytest.mark.parametrize("strange", [
+    "", "<html><body>Before you continue to YouTube</body></html>", "<html>Sorry, unusual traffic</html>",
+    '<link rel="canonical" href="https://evil.example/watch?v=LiveNow1234">"isLive":true',
+    '<link rel="canonical" href="https://www.youtube.com/watch?v=bad id">"isLive":true',
+])
+def test_a_page_that_is_not_understood_is_an_error_not_a_guess(strange):
+    with pytest.raises(live.LiveCheckError):
+        live.parse_live_page(strange)
+
+
+def test_without_a_key_the_page_is_read_and_the_api_is_not_called(db):
+    no_key = SimpleNamespace(**{**vars(SETTINGS), "youtube_api_key": None})
+    asked, client = [], FakeTelegram()
+
+    def read_page(channel_id, **options):
+        asked.append((channel_id, sorted(options)))
+        return live.parse_live_page(ON_AIR)
+
+    def api_must_not_be_used(*args, **kwargs):
+        raise AssertionError("the API was called without a key")
+    outcomes = [live.send_live_alerts(db, client, no_key, CHAT, get=api_must_not_be_used, read_page=read_page, download=covers)[0][1].outcome
+                for _ in range(3)]
+    assert outcomes == [OUTCOME_SENT, OUTCOME_ALREADY_SENT, OUTCOME_ALREADY_SENT]
+    assert asked[0] == (CHANNEL, ["timeout", "user_agent"]) and len(client.photos) == 1
+    assert "XAUUSD & GOLD" in client.photos[0][2] and "watch?v=LiveNow1234" in client.photos[0][2]
+
+
+def test_with_a_key_the_api_is_used_and_the_page_is_not_read(db):
+    def page_must_not_be_read(*args, **kwargs):
+        raise AssertionError("the page was read although a key is set")
+    get = api(["LiveNow1234"], [video("LiveNow1234", "live")])
+    result = live.send_live_alerts(db, FakeTelegram(), SETTINGS, CHAT, get=get, read_page=page_must_not_be_read, download=covers)
+    assert result[0][1].outcome == OUTCOME_SENT
+
+
+def test_reading_the_page_asks_only_youtube_for_the_configured_channel(monkeypatch):
+    seen = {}
+
+    def opened(request, timeout=0):
+        seen["url"] = request.full_url
+        return _ctx(io.BytesIO(NOTHING_ON.encode("utf-8")))
+    monkeypatch.setattr(live.urllib.request, "urlopen", opened)
+    assert live.find_live_on_page(CHANNEL) == []
+    assert seen["url"] == f"https://www.youtube.com/channel/{CHANNEL}/live"
+    for bad in ("", None, "@handle", "UCshort", CHANNEL + "/../x"):
+        with pytest.raises(live.LiveCheckError):
+            live.find_live_on_page(bad)
+
+    def refused(request, timeout=0):
+        raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", {}, io.BytesIO(b""))
+    monkeypatch.setattr(live.urllib.request, "urlopen", refused)
+    with pytest.raises(live.LiveCheckError, match="HTTP 429"):
+        live.find_live_on_page(CHANNEL)
+
+
 # -- text ----------------------------------------------------------------------------------
 
 def test_alert_text():
@@ -252,11 +331,11 @@ def test_cli_says_not_live_or_shows_the_alert(monkeypatch, tmp_path, capsys):
     assert "LIVE_YT_LiveNow1234" in out and "WE ARE LIVE NOW" in out and KEY not in out
 
 
-def test_cli_skips_quietly_without_a_key_and_reports_api_trouble_without_the_key(monkeypatch, tmp_path, capsys):
+def test_cli_skips_quietly_without_a_channel_and_reports_api_trouble_without_the_key(monkeypatch, tmp_path, capsys):
     from src import main as cli
-    _env(monkeypatch, tmp_path, key="")
+    _env(monkeypatch, tmp_path, channel="")
     assert cli.main(["--telegram-send-live"]) == 0
-    assert "YOUTUBE_API_KEY is not set. The live check was skipped." in capsys.readouterr().out
+    assert "YOUTUBE_CHANNEL_ID is not set. The live check was skipped." in capsys.readouterr().out
 
     def broken(resource, params, api_key, **options):
         raise live.LiveCheckError("YouTube's API answered HTTP 403 (quotaExceeded).")

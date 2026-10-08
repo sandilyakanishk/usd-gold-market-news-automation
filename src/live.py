@@ -2,21 +2,28 @@
 
     python -m src.main --telegram-send-live [--dry-run]
 
-Meant to run every minute. Each run asks YouTube's official Data API which of
-the channel's newest videos is a live broadcast that is on air right now, and
-posts one alert per broadcast: the stream's title, its cover and its link.
+Meant to run every minute. Each run finds out whether a broadcast is on air
+right now and posts one alert per broadcast: the stream's title, its cover
+and its link. The broadcast's video id is the message identity, so a stream
+is announced once however many runs see it.
 
-The broadcast's video id is the message identity, so a stream is announced
-once however many runs see it. The API key travels in a request header, never
-in an address, and never appears in a message or a log line.
+Two ways of finding out, chosen by configuration:
 
-Cost: two API units per run (2,880 a day of the free 10,000).
+  no key (default)   one GET of the channel's public page
+                     youtube.com/channel/<id>/live, which shows the stream
+                     that is on air, if any. Nothing to set up, but it reads
+                     a web page, so a change on YouTube's side can break it.
+  YOUTUBE_API_KEY    YouTube's official Data API (two units per run). The
+                     key travels in a request header, never in an address,
+                     and never appears in a message or a log line.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import logging
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -153,6 +160,50 @@ def find_live(channel_id: str, api_key: str, *, extra_ids: list[str] | None = No
     return parse_live(data)
 
 
+# -- the public page (no key) -----------------------------------------------------------------
+
+LIVE_PAGE = "https://www.youtube.com/channel/{channel_id}/live"
+MAX_PAGE_BYTES = 5 * 1024 * 1024
+_CANONICAL = re.compile(r'<link rel="canonical" href="https://www\.youtube\.com/(watch\?v=([A-Za-z0-9_-]{6,20})|channel/[A-Za-z0-9_-]+)"')
+_TITLE = re.compile(r'<meta name="title" content="([^"]*)"')
+
+
+def parse_live_page(page: str) -> list[LiveStream]:
+    """The broadcast shown on a channel's /live page, if it is on air.
+
+    The page is the channel itself when nothing is on, and a watch page when a
+    broadcast exists. A watch page for a stream that is only scheduled says
+    so ("isUpcoming"); one on air carries "isLive":true.
+    """
+    canonical = _CANONICAL.search(page)
+    if canonical is None:
+        # Not a page this code understands (a consent or error page, or a redesign): say so rather than guess.
+        raise LiveCheckError("YouTube's live page did not look as expected.")
+    video_id = canonical.group(2)
+    if not video_id:
+        return []  # the channel page: nothing is on
+    on_air = '"isLive":true' in page and '"isUpcoming":true' not in page and '"status":"LIVE_STREAM_OFFLINE"' not in page
+    if not on_air:
+        return []
+    title = _TITLE.search(page)
+    return [LiveStream(video_id, html.unescape(title.group(1)).strip() if title else "", None)]
+
+
+def find_live_on_page(channel_id: str, *, timeout: int = 20, user_agent: str = "") -> list[LiveStream]:
+    if not social._CHANNEL_ID.match(channel_id or ""):
+        raise LiveCheckError("YOUTUBE_CHANNEL_ID is not a YouTube channel id (it starts with UC and has 24 characters).")
+    request = urllib.request.Request(LIVE_PAGE.format(channel_id=channel_id),
+                                     headers={"User-Agent": user_agent, "Accept-Language": "en-US,en"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            page = response.read(MAX_PAGE_BYTES).decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        raise LiveCheckError(f"YouTube's live page answered HTTP {exc.code}.") from None
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise LiveCheckError(f"YouTube's live page could not be reached: {type(exc).__name__}.") from None
+    return parse_live_page(page)
+
+
 # -- text -----------------------------------------------------------------------------------
 
 def build_alert(stream: LiveStream, instagram_url: str | None = None) -> str:
@@ -198,13 +249,16 @@ class _AlertPost:
 
 def send_live_alerts(db: EventRepository, client: TelegramClient | None, settings: Settings, chat_id: str, *,
                      dry_run: bool = False, now: datetime | None = None, get=api_get, download=None,
-                     ) -> list[tuple[LiveStream, DeliveryResult, str]]:
+                     read_page=find_live_on_page) -> list[tuple[LiveStream, DeliveryResult, str]]:
     """Announce every broadcast that is on air and not yet announced."""
     if download is None:
         def download(url: str) -> bytes | None:
             return social.download_image(url, timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
-    streams = find_live(settings.youtube_channel_id, settings.youtube_api_key, get=get,
-                        timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
+    options = dict(timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
+    if settings.youtube_api_key:
+        streams = find_live(settings.youtube_channel_id, settings.youtube_api_key, get=get, **options)
+    else:
+        streams = read_page(settings.youtube_channel_id, **options)
     results = []
     for stream in streams:
         text = build_alert(stream, social.clean_profile_url(settings.instagram_profile_url))
@@ -218,6 +272,6 @@ def send_live_alerts(db: EventRepository, client: TelegramClient | None, setting
 
 __all__ = [
     "LiveCheckError", "LiveStream", "MESSAGE_TYPE", "OUTCOME_ALREADY_SENT", "OUTCOME_DRY_RUN", "OUTCOME_FAILED",
-    "OUTCOME_SENT", "api_get", "build_alert", "find_live", "newest_video_ids", "parse_live", "send_live_alerts",
+    "OUTCOME_SENT", "api_get", "build_alert", "find_live", "find_live_on_page", "parse_live_page", "newest_video_ids", "parse_live", "send_live_alerts",
     "uploads_playlist",
 ]
