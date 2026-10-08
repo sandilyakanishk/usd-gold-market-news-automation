@@ -230,6 +230,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
+          INSTAGRAM_PROFILE_URL: ${{ vars.INSTAGRAM_PROFILE_URL }}
         run: python -m src.main --telegram-send-videos
 
       # A short post every half hour: the gold price and the next high-impact

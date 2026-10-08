@@ -433,6 +433,7 @@ def test_video_forwarding_runs_only_when_a_channel_is_configured():
     assert commands(step) == ["python -m src.main --telegram-send-videos"]
     assert "vars.YOUTUBE_CHANNEL_ID != ''" in step and "vars.TELEGRAM_ENABLED == 'true'" in step
     assert "YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}" in step
+    assert "INSTAGRAM_PROFILE_URL: ${{ vars.INSTAGRAM_PROFILE_URL }}" in step
     assert "continue-on-error: true" in step and "WHAPI_TOKEN" not in step and "steps.plan.outputs" not in step
     # The channel id is configuration, not source: it is never written into the workflow file.
     assert not re.search(r"UC[A-Za-z0-9_-]{22}", workflow_text(PRODUCTION))

@@ -84,6 +84,7 @@ class Settings:
     youtube_channel_id: str | None = None  # the owner's channel (UC...); its new Shorts are forwarded to Telegram
     youtube_forward: str = "shorts"  # "shorts" or "all" (also long videos and live streams)
     video_posts_since: str = DEFAULT_VIDEO_POSTS_SINCE  # older uploads are never forwarded
+    instagram_profile_url: str | None = None  # shown under every forwarded video
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -123,4 +124,5 @@ class Settings:
             youtube_channel_id=(env("YOUTUBE_CHANNEL_ID") or "").strip() or None,
             youtube_forward=_youtube_forward(env("YOUTUBE_FORWARD") or "shorts"),
             video_posts_since=env("VIDEO_POSTS_SINCE") or DEFAULT_VIDEO_POSTS_SINCE,
+            instagram_profile_url=(env("INSTAGRAM_PROFILE_URL") or "").strip() or None,
         )

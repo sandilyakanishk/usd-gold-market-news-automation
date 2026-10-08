@@ -978,7 +978,8 @@ python -m src.main --telegram-send-videos             # post new videos
 - **Settings.** `YOUTUBE_CHANNEL_ID` (the id starting with `UC`; empty
   switches the feature off), `YOUTUBE_FORWARD` (`shorts`, the default, or
   `all` to include long videos and live streams) and `VIDEO_POSTS_SINCE`
-  (uploads published earlier are never forwarded).
+  (uploads published earlier are never forwarded). `INSTAGRAM_PROFILE_URL`,
+  if set, adds the owner's Instagram profile link under the YouTube link.
 - **Once per video.** The video id is the message identity
   (`VIDEO_YT_<id>`), recorded in `message_deliveries`.
 - **Cover image.** A Short's upright cover is tried first, then the feed's

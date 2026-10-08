@@ -42,6 +42,7 @@ MAX_POSTS_PER_RUN = 3
 SHORTS, ALL = "shorts", "all"
 _CHANNEL_ID = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{6,20}$")
+_INSTAGRAM_PROFILE = re.compile(r"^https://(?:www\.)?instagram\.com/([A-Za-z0-9._]{1,30})/?(?:\?.*)?$")
 _NS = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015",
        "media": "http://search.yahoo.com/mrss/"}
 
@@ -135,10 +136,18 @@ def select_new(videos: list[Video], *, since: datetime, kinds: str = SHORTS) -> 
 
 # -- text -----------------------------------------------------------------------------------
 
-def build_caption(video: Video) -> str:
-    """The owner's own words, unchanged, with the link. Shortened only to fit Telegram's limit."""
+def clean_profile_url(value: str | None) -> str | None:
+    """An Instagram profile address without tracking parameters, or None if it is not one."""
+    match = _INSTAGRAM_PROFILE.match((value or "").strip())
+    return f"https://www.instagram.com/{match.group(1)}" if match else None
+
+
+def build_caption(video: Video, instagram_url: str | None = None) -> str:
+    """The owner's own words, unchanged, with the links. Shortened only to fit Telegram's limit."""
     header = "🎬 NEW REEL" if video.is_short else "🎬 NEW VIDEO"
     footer = f"▶️ YouTube: {video.link}"
+    if instagram_url:
+        footer += f"\n📸 Instagram: {instagram_url}"
     body = video.title
     if video.description and video.description != video.title:
         body = f"{body}\n\n{video.description}" if body else video.description
@@ -179,7 +188,7 @@ def send_new_videos(db: EventRepository, client: TelegramClient | None, settings
     new = select_new(videos, since=parse_since(settings.video_posts_since), kinds=settings.youtube_forward)
     results, posted = [], 0
     for video in new:
-        caption = build_caption(video)
+        caption = build_caption(video, clean_profile_url(settings.instagram_profile_url))
         if posted >= MAX_POSTS_PER_RUN and db.get_delivery(video.message_key, PROVIDER_TELEGRAM, chat_id) is None:
             continue  # the next run picks it up
         result = deliver_text(
@@ -194,5 +203,5 @@ def send_new_videos(db: EventRepository, client: TelegramClient | None, settings
 
 __all__ = [
     "ALL", "MAX_POSTS_PER_RUN", "MESSAGE_TYPE", "OUTCOME_ALREADY_SENT", "SHORTS", "Video", "VideoFeedError",
-    "build_caption", "fetch_feed", "parse_feed", "parse_since", "select_new", "send_new_videos",
+    "build_caption", "clean_profile_url", "fetch_feed", "parse_feed", "parse_since", "select_new", "send_new_videos",
 ]

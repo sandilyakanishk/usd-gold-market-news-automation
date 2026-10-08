@@ -12,7 +12,7 @@ from src.delivery.telegram import TelegramClient, TelegramDestinationError, Tele
 
 CHAT = "@example_channel"
 CHANNEL = "UC" + "a" * 22
-SETTINGS = SimpleNamespace(youtube_channel_id=CHANNEL, youtube_forward="shorts", video_posts_since="2026-10-08T00:00:00Z",
+SETTINGS = SimpleNamespace(instagram_profile_url=None, youtube_channel_id=CHANNEL, youtube_forward="shorts", video_posts_since="2026-10-08T00:00:00Z",
                            request_timeout_seconds=5, user_agent="test-agent")
 
 
@@ -132,6 +132,35 @@ def test_caption_always_fits_telegrams_limit_and_keeps_the_link():
     caption = social.build_caption(video)
     assert len(caption) <= social.CAPTION_LIMIT
     assert caption.endswith("▶️ YouTube: https://www.youtube.com/shorts/AbCdEfGhIjK") and "…" in caption
+
+
+def test_the_instagram_profile_is_added_under_the_youtube_link():
+    video = social.parse_feed(feed(NEW_SHORT))[0]
+    caption = social.build_caption(video, "https://www.instagram.com/example.handle")
+    assert caption.endswith("▶️ YouTube: https://www.youtube.com/shorts/AbCdEfGhIjK\n"
+                            "📸 Instagram: https://www.instagram.com/example.handle")
+    long_one = social.parse_feed(feed(entry("AbCdEfGhIjK", "T", "2026-10-08T12:00:00+00:00", description="word " * 900)))[0]
+    fitted = social.build_caption(long_one, "https://www.instagram.com/example.handle")
+    assert len(fitted) <= social.CAPTION_LIMIT and fitted.endswith("https://www.instagram.com/example.handle")
+
+
+@pytest.mark.parametrize("given, expected", [
+    ("https://www.instagram.com/example.handle?stkn=abc123==", "https://www.instagram.com/example.handle"),
+    ("https://instagram.com/example_handle/", "https://www.instagram.com/example_handle"),
+    (" https://www.instagram.com/example ", "https://www.instagram.com/example"),
+    ("https://www.instagram.com/reel/Cxyz123/", None), ("https://evil.example/instagram.com/x", None),
+    ("http://www.instagram.com/example", None), ("example.handle", None), ("", None), (None, None),
+])
+def test_profile_address_is_cleaned_of_tracking_and_checked(given, expected):
+    assert social.clean_profile_url(given) == expected
+
+
+def test_the_configured_profile_reaches_the_post(db):
+    client = FakeTelegram()
+    settings = SimpleNamespace(**{**vars(SETTINGS), "instagram_profile_url": "https://www.instagram.com/example.handle?stkn=abc"})
+    social.send_new_videos(db, client, settings, CHAT, fetch=fetcher(feed(NEW_SHORT)))
+    assert client.photos[0][2].endswith("\n📸 Instagram: https://www.instagram.com/example.handle")
+    assert "stkn" not in client.photos[0][2]
 
 
 # -- sending -------------------------------------------------------------------------------
