@@ -88,6 +88,24 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
     recorded_at       TEXT NOT NULL,
     PRIMARY KEY (symbol, slot)
 );
+
+CREATE TABLE IF NOT EXISTS daily_prices (
+    symbol  TEXT NOT NULL,
+    day     TEXT NOT NULL,
+    open    REAL NOT NULL,
+    high    REAL NOT NULL,
+    low     REAL NOT NULL,
+    close   REAL NOT NULL,
+    samples INTEGER NOT NULL,
+    PRIMARY KEY (symbol, day)
+);
+
+CREATE TABLE IF NOT EXISTS content_state (
+    kind       TEXT PRIMARY KEY,
+    position   INTEGER NOT NULL DEFAULT 0,
+    recent     TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+);
 """
 
 

@@ -113,3 +113,29 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
 );
 
 ALTER TABLE price_snapshots ENABLE ROW LEVEL SECURITY;
+
+-- One line per trading day, made from that day's recorded prices before they
+-- are deleted. Feeds the "key levels" card. "day" is an ISO date kept as text.
+CREATE TABLE IF NOT EXISTS daily_prices (
+    symbol  TEXT             NOT NULL,
+    day     TEXT             NOT NULL,
+    open    DOUBLE PRECISION NOT NULL,
+    high    DOUBLE PRECISION NOT NULL,
+    low     DOUBLE PRECISION NOT NULL,
+    close   DOUBLE PRECISION NOT NULL,
+    samples INTEGER          NOT NULL,
+    PRIMARY KEY (symbol, day)
+);
+
+ALTER TABLE daily_prices ENABLE ROW LEVEL SECURITY;
+
+-- Where each content list (quiz, rules, facts, myths, lessons) has got to,
+-- and what was used lately. A handful of rows; never cleaned up.
+CREATE TABLE IF NOT EXISTS content_state (
+    kind       TEXT    PRIMARY KEY,
+    position   INTEGER NOT NULL DEFAULT 0,
+    recent     TEXT    NOT NULL DEFAULT '[]',
+    updated_at TEXT    NOT NULL
+);
+
+ALTER TABLE content_state ENABLE ROW LEVEL SECURITY;

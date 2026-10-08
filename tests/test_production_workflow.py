@@ -14,7 +14,7 @@ from src.runplan import RunPlan, plan
 
 from .test_cloud_runner import SAFE_TEST, SECRET_NAMES, WORKFLOWS, code_lines, workflow_text
 
-PRODUCTION_SECRETS = SECRET_NAMES | {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"}
+PRODUCTION_SECRETS = SECRET_NAMES | {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GEMINI_API_KEY"}
 TELEGRAM_GUARD = ("!cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' "
                   "&& steps.collect.outcome == 'success' && steps.telegram.outcome == 'success'")
 
@@ -209,7 +209,7 @@ def test_it_refreshes_and_enriches_before_any_send():
         "Send today's high-impact alerts", "Send newly released results", "Send tomorrow's reminders",
         "Telegram: check the bot and the channel (sends nothing)", "Telegram: send the morning update",
         "Telegram: send today's high-impact alerts", "Telegram: send newly released results",
-        "Telegram: send tomorrow's reminders", "Telegram: forward new videos", "Telegram: send the market pulse",
+        "Telegram: send tomorrow's reminders", "Telegram: forward new videos", "Telegram: send the scheduled cards",
         "Fail the run if a source reported a problem"]
     collect = all_steps["Refresh the calendar and look up released figures"]
     assert commands(collect) == ["python -m src.main --enrich-actuals --week > collect.out 2> collect.err"]
@@ -263,7 +263,7 @@ def test_it_fails_loudly_and_never_retries():
         assert forbidden not in text, forbidden
     # The one tolerated failure is the half-hourly market pulse, an extra that the next run repeats.
     assert text.count("continue-on-error") == 2
-    for extra in ("Telegram: send the market pulse", "Telegram: forward new videos"):
+    for extra in ("Telegram: send the scheduled cards", "Telegram: forward new videos"):
         assert "continue-on-error" in all_steps[extra]
     assert "timeout-minutes: 10" in text and "contents: read" in text and "DATABASE_BACKEND: postgres" in text
 
@@ -303,7 +303,7 @@ def test_workflow_file_is_plain_spaces_with_unix_line_endings():
 def test_telegram_sends_mirror_the_whatsapp_ones():
     all_steps = steps()
     sends = {name: commands(text)[-1] for name, text in all_steps.items()
-             if "--telegram-send-" in text and "--telegram-send-pulse" not in text and "--telegram-send-videos" not in text}
+             if "--telegram-send-" in text and "--telegram-send-scheduled" not in text and "--telegram-send-videos" not in text}
     assert sends == {
         "Telegram: send the morning update": "python -m src.main --telegram-send-morning",
         "Telegram: send today's high-impact alerts": "python -m src.main --telegram-send-alert --today",
@@ -396,17 +396,17 @@ def test_the_calendar_download_is_cached_between_runs():
 
 def test_the_market_pulse_goes_to_telegram_only_on_every_run():
     all_steps = steps()
-    step = all_steps["Telegram: send the market pulse"]
-    assert commands(step) == ["python -m src.main --telegram-send-pulse"]
+    step = all_steps["Telegram: send the scheduled cards"]
+    assert commands(step) == ["python -m src.main --telegram-send-scheduled"]
     # Every run: the application itself posts once per half-hour slot. No window condition.
     assert "steps.plan.outputs" not in step
     assert "vars.TELEGRAM_ENABLED == 'true'" in step and "steps.telegram.outcome == 'success'" in step
     # A price-source hiccup must not turn the whole run red; the next run retries.
     assert "continue-on-error: true" in step
     # WhatsApp never receives it: 48 posts a day would exhaust the Whapi allowance.
-    assert "WHAPI_TOKEN" not in step and "send-pulse" not in "\n".join(t for n, t in all_steps.items() if not n.startswith("Telegram:"))
+    assert "WHAPI_TOKEN" not in step and "send-scheduled" not in "\n".join(t for n, t in all_steps.items() if not n.startswith("Telegram:"))
     assert [n for n, t in all_steps.items() if "continue-on-error" in t] == [
-        "Telegram: forward new videos", "Telegram: send the market pulse"]
+        "Telegram: forward new videos", "Telegram: send the scheduled cards"]
 
 
 # -- WhatsApp is opt-in --------------------------------------------------------------------

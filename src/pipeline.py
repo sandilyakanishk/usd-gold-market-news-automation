@@ -6,6 +6,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from datetime import time as clock_time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -126,23 +127,28 @@ def cleanup_old_events(settings: Settings, db: EventRepository, today: date | No
     return removed
 
 
-# A market pulse belongs to one half hour that never comes back, so its record is only needed briefly.
-PULSE_RECORD_DAYS = 2
-PULSE_MESSAGE_TYPE = "MARKET_PULSE"
+# Records that must outlive the day they were made, because the thing they describe can still come up the
+# next day: a reel stays in YouTube's feed, a result is looked for from yesterday onward, a stream can run on.
+TWO_DAY_TYPES = ("HIGH_ALERT", "ACTUAL_RESULT", "UPCOMING_REMINDER", "VIDEO_POST", "LIVE_ALERT")
+# The day's first message goes out at this time; the previous day's records are deleted from then on.
+CLEANUP_FROM = clock_time(8, 15)
 
 
 def cleanup_old_deliveries(settings: Settings, db: EventRepository, now: datetime | None = None) -> int:
-    """Delete "this was sent" records that can no longer prevent a duplicate. Returns how many were removed.
+    """Delete the previous days' "this was sent" records. Returns how many were removed.
 
-    A record must outlive whatever could make the same message come up again:
-    events are kept for calendar_retention_days and videos are forwarded only
-    while they are a few days old, so the general window is never shorter
-    than the calendar's plus one day.
+    Nothing is deleted during a day. From the morning's first message onward,
+    records made before today are deleted, except the TWO_DAY_TYPES, which
+    are kept one day longer. Only the database is touched, never Telegram.
     """
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    days = max(settings.delivery_retention_days, settings.calendar_retention_days + 1)
+    tz = ZoneInfo(settings.display_timezone) if settings.display_timezone else timezone.utc
+    local = now.astimezone(tz)
+    if local.time() < CLEANUP_FROM:
+        return 0
+    today = datetime.combine(local.date(), clock_time(0), tzinfo=tz).astimezone(timezone.utc)
     stamp = "%Y-%m-%dT%H:%M:%SZ"
-    removed = db.cleanup_old_deliveries((now - timedelta(days=PULSE_RECORD_DAYS)).strftime(stamp), only_type=PULSE_MESSAGE_TYPE)
-    removed += db.cleanup_old_deliveries((now - timedelta(days=days)).strftime(stamp), except_type=PULSE_MESSAGE_TYPE)
-    log.info("Retention cleanup: removed %d delivery record(s) (pulse %d days, others %d days)", removed, PULSE_RECORD_DAYS, days)
+    removed = db.cleanup_old_deliveries(today.strftime(stamp), except_types=TWO_DAY_TYPES)
+    removed += db.cleanup_old_deliveries((today - timedelta(days=1)).strftime(stamp))
+    log.info("Daily cleanup: removed %d delivery record(s) made before today", removed)
     return removed

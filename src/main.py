@@ -33,7 +33,7 @@ from .delivery.service import (
     send_telegram_test_message, send_test_message, telegram_chat_id,
 )
 from .delivery.telegram import describe_chat
-from . import live, pulse, social
+from . import cards, live, pulse, social
 from .delivery.whapi import mask_chat_id
 from .filters.gold_usd_filters import USD
 from .pipeline import cleanup_old_events, sync
@@ -125,6 +125,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="forward new YouTube Shorts from YOUTUBE_CHANNEL_ID (cover image, caption and link)")
     tg.add_argument("--telegram-send-live", action="store_true",
                     help="post an alert if the YouTube channel is live right now")
+    tg.add_argument("--telegram-send-scheduled", action="store_true",
+                    help="record the gold price and post whichever scheduled card is due (pulse, key levels, recap, ...)")
     tg.add_argument("--telegram-send-pulse", action="store_true",
                     help="send the half-hourly market pulse (gold price and next high-impact USD event)")
 
@@ -505,6 +507,34 @@ def run_telegram_send(args: argparse.Namespace, settings: Settings, today: date)
         destination_text=f"telegram_channel ({describe_chat(chat_id)}) via telegram", id_label="Telegram message ID")
 
 
+def run_telegram_scheduled(args: argparse.Namespace, settings: Settings, today: date) -> int:
+    """Record the gold price and post the scheduled cards that are due. Telegram only."""
+    chat_id = telegram_chat_id(settings)
+    client = None if args.dry_run else build_telegram_client(settings)
+    with open_database(settings) as db:
+        results = cards.send_scheduled(db, client, settings, chat_id, dry_run=args.dry_run)
+    if args.dry_run:
+        print("DRY RUN: nothing is sent and nothing is recorded.\n")
+    if not results:
+        print("No card is due right now.")
+        return 0
+    failed = False
+    for result in results:
+        name = result.message_key or result.kind
+        if result.outcome == OUTCOME_ALREADY_SENT:
+            print(f"{name}: already sent.")
+        elif result.outcome == OUTCOME_DRY_RUN:
+            print(f"===== {name} =====\nWould send:\n{result.text}\n")
+        elif result.outcome == OUTCOME_SENT:
+            print(f"{name}: sent. Telegram message ID {result.provider_message_id}")
+        elif result.outcome == cards.OUTCOME_NOT_READY:
+            print(f"{name}: skipped ({result.detail}).")
+        else:
+            failed = True
+            print(f"{name}: FAILED: {result.detail}")
+    return 1 if failed else 0
+
+
 def run_telegram_pulse(args: argparse.Namespace, settings: Settings, today: date) -> int:
     """Post the market pulse for the current half-hour slot. Telegram only."""
     chat_id = telegram_chat_id(settings)
@@ -745,7 +775,7 @@ def main(argv: list[str] | None = None) -> int:
         print("--dry-run and --recheck-released only apply together with --enrich-actuals.", file=sys.stderr)
         return 2
     sending = wants_whatsapp_send(args) or wants_telegram_send(args)
-    if args.dry_run and not (args.enrich_actuals or sending or args.telegram_send_pulse or args.telegram_send_videos
+    if args.dry_run and not (args.enrich_actuals or sending or args.telegram_send_pulse or args.telegram_send_videos or args.telegram_send_scheduled
                                  or args.telegram_send_live):
         print("--dry-run and --recheck-released only apply together with --enrich-actuals "
               "(--dry-run also with a --whatsapp-send-... or --telegram-send-... option).", file=sys.stderr)
@@ -769,6 +799,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_telegram_check(settings)
         if args.telegram_test:
             return run_telegram_test(settings)
+        if args.telegram_send_scheduled:
+            return _guarded(run_telegram_scheduled, "TELEGRAM", args, settings, today)
         if args.telegram_send_live:
             return _guarded(run_telegram_live, "TELEGRAM", args, settings, today)
         if args.telegram_send_videos:

@@ -233,19 +233,21 @@ jobs:
           INSTAGRAM_PROFILE_URL: ${{ vars.INSTAGRAM_PROFILE_URL }}
         run: python -m src.main --telegram-send-videos
 
-      # A short post every half hour: the gold price and the next high-impact
-      # USD event. Telegram only (WhatsApp's request allowance is too small
-      # for 48 posts a day). The application posts once per half-hour slot
-      # however often this workflow runs, and not at all over the weekend. A
-      # price-source hiccup is retried by the next run and does not fail this one.
-      - name: "Telegram: send the market pulse"
+      # The day's timetable of cards (src/cards.py): market pulse every two
+      # hours, key levels in the morning, the recap at night, and so on. Each
+      # run records the gold price and posts whichever card is due; the
+      # application posts each one once. Telegram only. A price-source hiccup
+      # is retried by the next run and does not fail this one.
+      - name: "Telegram: send the scheduled cards"
         if: ${{ !cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.telegram.outcome == 'success' }}
         continue-on-error: true
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python -m src.main --telegram-send-pulse
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python -m src.main --telegram-send-scheduled
 
       # The application keeps working from stored data when a source is
       # unavailable. This step makes sure such a run is still reported as

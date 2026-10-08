@@ -912,7 +912,41 @@ no monthly request cap.
 If a value in a message would break Telegram's formatting, the same text is
 sent as plain text instead.
 
-## Market pulse (Telegram only)
+## Scheduled cards (Telegram only)
+
+`python -m src.main --telegram-send-scheduled` runs every 10 minutes. It
+records the gold price, then posts whichever card is due (India time):
+
+| Time | Card | Days |
+|---|---|---|
+| 08:30 | Key levels of the day | Monday to Friday |
+| 09:00, 11:00 ... 23:00 | Market pulse | Monday to Friday |
+| 10:00, 12:00 ... 22:00 | Trader's corner (quiz, rule, fact, myth in turn) | every day |
+| 11:30 | What's moving gold | Monday to Friday |
+| 15:30 | Learn card | every day |
+| 23:30 | Daily recap | Monday to Friday |
+
+- Nothing is scheduled between midnight and 08:30.
+- A card's slot is its message identity (`MARKET_PULSE_2026-10-08_0900`), so
+  each is posted once. A late run still posts a card up to 50 minutes after
+  its time; after that the slot is skipped.
+- **Recorded prices.** Each run stores the price in `price_snapshots` (one
+  per 10 minutes, only while the market is open and the quote is fresh).
+  They feed the pulse's change line and the daily recap. Each morning the
+  past days' samples become one line in `daily_prices` (open, high, low,
+  close) and are deleted.
+- **Key levels** are classic pivots from the previous trading day's line:
+  `P = (H + L + C) / 3`, `R1 = 2P - L`, `S1 = 2P - H`, `R2 = P + (H - L)`,
+  `S2 = P - (H - L)`. High and low are those of the recorded samples, so
+  they can differ slightly from an exchange's figures.
+- **Daily recap** is the first, highest, lowest and latest price recorded
+  that India day.
+- A card that has no data yet (for example the first morning) is skipped,
+  not invented.
+
+The timetable lives in `src/cards.py`.
+
+### Market pulse
 
 A short post every half hour while the gold market is open:
 
@@ -1348,20 +1382,25 @@ Events dated more than `CALENDAR_RETENTION_DAYS` days before today are
 deleted, where "today" is the current date in `DISPLAY_TIMEZONE`. With the
 default of 14, a run on 8 October keeps everything from 24 September onward.
 
-The same cleanup keeps the other tables small, so the database does not grow
-without limit:
+The other tables are cleaned every day, so the database does not grow:
 
-| Data | Kept for |
+| Data | Deleted |
 |---|---|
-| calendar events, their classifications and actuals | `CALENDAR_RETENTION_DAYS` (14) |
-| "this was sent" records of market pulses | 2 days |
-| all other "this was sent" records | `DELIVERY_RETENTION_DAYS` (30), never less than the calendar's plus one day |
-| posted gold prices | 14 days |
+| "this was sent" records of scheduled cards and the daily brief | the next morning |
+| "this was sent" records of alerts, results, reminders, reels and live alerts | the morning after that |
+| 10-minute gold prices | the next morning, after one summary line per day is kept |
+| daily price summaries | after 10 days |
+| content bookmarks | never (a handful of rows) |
 
-A delivery record is what stops a message being sent twice, so it is only
-deleted once the message can no longer come up again: events are gone by
-then, a pulse's half hour never returns, and videos older than 7 days are
-never forwarded.
+Nothing is deleted during a day: the clean-up starts with the day's first
+message at 08:15 India time. Only the database is touched, never Telegram.
+The second group is kept one day longer because those records prevent a
+repeat: a reel is still in YouTube's feed the next day (reels older than 24
+hours are never forwarded), and results are looked for from yesterday onward.
+
+The calendar itself keeps `CALENDAR_RETENTION_DAYS` days. Deleting this
+week's past events sooner would only make every run download and look them
+up again.
 
 Cleanup runs automatically at the end of every successful sync, and on demand:
 

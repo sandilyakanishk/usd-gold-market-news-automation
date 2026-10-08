@@ -342,14 +342,14 @@ def test_link_preview_is_off_unless_asked_for(monkeypatch):
 
 # -- command line --------------------------------------------------------------------------
 
-def test_a_video_older_than_a_week_is_never_forwarded_even_if_its_record_is_gone(db):
+def test_a_video_older_than_a_day_is_never_forwarded_even_if_its_record_is_gone(db):
     """Delivery records are deleted after a while; an old video still in the feed must not be posted again."""
     client = FakeTelegram()
-    weeks_later = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+    weeks_later = datetime(2026, 10, 9, 13, 0, tzinfo=timezone.utc)   # 25 hours after it was published
     assert db.count_deliveries() == 0                                # as if the record had been cleaned up
     assert social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)), now=weeks_later) == []
     assert client.photos == []
-    six_days = datetime(2026, 10, 14, 11, 0, tzinfo=timezone.utc)
+    six_days = datetime(2026, 10, 9, 11, 0, tzinfo=timezone.utc)   # 23 hours after it was published
     assert len(social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)), now=six_days)) == 1
 
 

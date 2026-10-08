@@ -40,8 +40,9 @@ CAPTION_LIMIT = 1024  # Telegram's limit for the text under a photo
 # A safety limit: if many videos appear at once, the rest follow on the next runs.
 MAX_POSTS_PER_RUN = 3
 SHORTS, ALL = "shorts", "all"
-# Far shorter than the time delivery records are kept (see pipeline.cleanup_old_deliveries).
-FORWARD_MAX_AGE = timedelta(days=7)
+# Shorter than the time a video's delivery record is kept (see pipeline.cleanup_old_deliveries):
+# the record lasts through the day after posting, by which time the video is older than this.
+FORWARD_MAX_AGE = timedelta(hours=24)
 # How long a new video may wait for its cover image before it is posted without one.
 COVER_WAIT = timedelta(minutes=45)
 MIN_IMAGE_BYTES, MAX_IMAGE_BYTES = 5_000, 10 * 1024 * 1024

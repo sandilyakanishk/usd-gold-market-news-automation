@@ -73,6 +73,9 @@ _D_UPSERT = (
 )
 PRICES_TABLE = "price_snapshots"
 PRICE_COLUMNS = ("symbol", "slot", "price", "source", "source_updated_at", "recorded_at")
+DAILY_PRICES_TABLE = "daily_prices"
+DAILY_PRICE_COLUMNS = ("symbol", "day", "open", "high", "low", "close", "samples")
+CONTENT_STATE_TABLE = "content_state"
 _C_SELECT = f"SELECT {', '.join(CLASSIFICATION_COLUMNS)} FROM {CLASSIFICATION_TABLE}"
 _C_UPSERT = (
     f"INSERT INTO {CLASSIFICATION_TABLE} ({', '.join(CLASSIFICATION_COLUMNS)}) "
@@ -415,13 +418,12 @@ class EventRepository(ABC):
         rows = self._read(f"{_D_SELECT} ORDER BY updated_at DESC, message_key LIMIT {int(limit)}")
         return [self._decode_delivery(r) for r in rows]
 
-    def cleanup_old_deliveries(self, cutoff: str, *, only_type: str | None = None, except_type: str | None = None) -> int:
+    def cleanup_old_deliveries(self, cutoff: str, *, except_types: Iterable[str] = ()) -> int:
         """Delete delivery records last touched before `cutoff` (ISO UTC instant). Returns the count."""
         sql, params = f"DELETE FROM {DELIVERIES_TABLE} WHERE updated_at < ?", [self._timestamp_param(cutoff)]
-        if only_type is not None:
-            sql, params = sql + " AND message_type = ?", params + [only_type]
-        if except_type is not None:
-            sql, params = sql + " AND message_type <> ?", params + [except_type]
+        kept = list(except_types)
+        if kept:
+            sql, params = sql + f" AND message_type NOT IN ({', '.join('?' for _ in kept)})", params + kept
         with self._transaction():
             return self._write(sql, params)
 
@@ -455,6 +457,56 @@ class EventRepository(ABC):
     def delete_price_snapshots_before(self, symbol: str, slot: str) -> int:
         with self._transaction():
             return self._write(f"DELETE FROM {PRICES_TABLE} WHERE symbol = ? AND slot < ?", (symbol, slot))
+
+    def price_snapshots_between(self, symbol: str, start_slot: str, end_slot: str) -> list[dict]:
+        """Stored prices with start_slot <= slot < end_slot, oldest first."""
+        rows = self._read(
+            f"SELECT {', '.join(PRICE_COLUMNS)} FROM {PRICES_TABLE} WHERE symbol = ? AND slot >= ? AND slot < ? ORDER BY slot",
+            (symbol, start_slot, end_slot))
+        return [{**dict(r), "price": float(r["price"])} for r in rows]
+
+    # -- daily price summaries ---------------------------------------------------
+    # One line per trading day (open, high, low, close), made from that day's
+    # recorded prices before they are deleted. "day" is an ISO date kept as text.
+
+    def save_daily_price(self, symbol: str, day: str, open_: float, high: float, low: float, close: float, samples: int) -> None:
+        with self._transaction():
+            self._write(
+                f"INSERT INTO {DAILY_PRICES_TABLE} ({', '.join(DAILY_PRICE_COLUMNS)}) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (symbol, day) DO UPDATE SET open = excluded.open, high = excluded.high, low = excluded.low, "
+                "close = excluded.close, samples = excluded.samples",
+                (symbol, day, float(open_), float(high), float(low), float(close), int(samples)))
+
+    def latest_daily_price(self, symbol: str, before_day: str) -> dict | None:
+        """The summary of the most recent day before `before_day`, or None."""
+        rows = self._read(
+            f"SELECT {', '.join(DAILY_PRICE_COLUMNS)} FROM {DAILY_PRICES_TABLE} WHERE symbol = ? AND day < ? "
+            "ORDER BY day DESC LIMIT 1", (symbol, before_day))
+        if not rows:
+            return None
+        row = dict(rows[0])
+        return {**row, **{k: float(row[k]) for k in ("open", "high", "low", "close")}, "samples": int(row["samples"])}
+
+    def delete_daily_prices_before(self, symbol: str, day: str) -> int:
+        with self._transaction():
+            return self._write(f"DELETE FROM {DAILY_PRICES_TABLE} WHERE symbol = ? AND day < ?", (symbol, day))
+
+    # -- content bookmarks -------------------------------------------------------
+    # Where each content list (quiz, rules, ...) has got to, and what was used lately.
+
+    def get_content_state(self, kind: str) -> dict | None:
+        rows = self._read(f"SELECT kind, position, recent, updated_at FROM {CONTENT_STATE_TABLE} WHERE kind = ?", (kind,))
+        if not rows:
+            return None
+        row = dict(rows[0])
+        return {**row, "position": int(row["position"])}
+
+    def save_content_state(self, kind: str, position: int, recent: str, updated_at: str) -> None:
+        with self._transaction():
+            self._write(
+                f"INSERT INTO {CONTENT_STATE_TABLE} (kind, position, recent, updated_at) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT (kind) DO UPDATE SET position = excluded.position, recent = excluded.recent, "
+                "updated_at = excluded.updated_at", (kind, int(position), recent, updated_at))
 
     def count_price_snapshots(self) -> int:
         return self._read(f"SELECT COUNT(*) AS n FROM {PRICES_TABLE}")[0]["n"]
