@@ -2,13 +2,20 @@
 and under which conditions, so a later edit cannot quietly widen it."""
 
 import re
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
+import pytest
+
+from src import runplan
 from src.actuals.models import RELEASE_STATUSES
 from src.config import PROJECT_ROOT
+from src.runplan import RunPlan, plan
 
 from .test_cloud_runner import SAFE_TEST, SECRET_NAMES, WORKFLOWS, code_lines, workflow_text
 
 PRODUCTION = WORKFLOWS / "production.yml"
+IST = ZoneInfo("Asia/Kolkata")
 IST_OFFSET_MINUTES = 5 * 60 + 30
 GUARD = ("!cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' "
          "&& steps.collect.outcome == 'success'")
@@ -46,17 +53,23 @@ def expand(field, low, high):
     return sorted(values)
 
 
-def india_times(cron):
-    """Every HH:MM in India time at which a daily cron expression fires."""
+def india_minutes(cron):
+    """Minutes after India midnight at which a daily cron expression fires, in firing (UTC) order."""
     minute, hour, day, month, weekday = cron.split()
     assert (day, month, weekday) == ("*", "*", "*")
-    times = []
-    for h in expand(hour, 0, 23):
-        for m in expand(minute, 0, 59):
-            total = (h * 60 + m + IST_OFFSET_MINUTES) % (24 * 60)
-            times.append(f"{total // 60:02d}:{total % 60:02d}")
-    return times
+    return [(h * 60 + m + IST_OFFSET_MINUTES) % (24 * 60) for h in expand(hour, 0, 23) for m in expand(minute, 0, 59)]
 
+
+def hhmm(minutes):
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def at(hour, minute=0, day=8):
+    """A moment given in India time."""
+    return datetime(2026, 10, day, hour, minute, tzinfo=IST)
+
+
+# -- triggers and schedule ---------------------------------------------------------------
 
 def test_triggers_are_the_schedule_and_a_manual_start():
     lines = code_lines(workflow_text(PRODUCTION))
@@ -73,32 +86,31 @@ def test_triggers_are_the_schedule_and_a_manual_start():
 
 def test_schedule_in_india_time():
     crons = re.findall(r'- cron: "([^"]+)"', workflow_text(PRODUCTION))
-    assert crons == ["45 2 * * *", "7,37 12-19 * * *", "45 15 * * *"]
-    morning, polling, evening = (india_times(c) for c in crons)
-    assert morning == ["08:15"]
-    assert evening == ["21:15"]
-    assert polling == ["17:37", "18:07", "18:37", "19:07", "19:37", "20:07", "20:37", "21:07", "21:37", "22:07",
-                       "22:37", "23:07", "23:37", "00:07", "00:37", "01:07"]
-    # Polling stays inside roughly 17:30-01:30 India time, every 30 minutes.
-    offsets = [(int(t[:2]) * 60 + int(t[3:]) - 17 * 60) % (24 * 60) for t in polling]
-    assert offsets == sorted(offsets) and {b - a for a, b in zip(offsets, offsets[1:])} == {30}
-    assert 30 <= offsets[0] and offsets[-1] <= 8 * 60 + 30
-    everything = morning + polling + evening
-    assert not any(t.endswith(":00") for t in everything)         # never on the hour
-    assert len(everything) == 18 == len(set(everything))           # 18 runs a day; no all-day polling
-    # No two runs closer than five minutes apart (Forex Factory allows 2 downloads per 5 minutes).
-    minutes = sorted(int(t[:2]) * 60 + int(t[3:]) for t in everything)
-    assert min(b - a for a, b in zip(minutes, minutes[1:])) >= 5
+    assert crons == ["15,45 2-19 * * *"]
+    times = india_minutes(crons[0])
+    assert len(times) == 36 == len(set(times))                       # 36 runs a day
+    assert (hhmm(times[0]), hhmm(times[1]), hhmm(times[-1])) == ("07:45", "08:15", "01:15")
+    # Every 30 minutes from 07:45 to 01:15 India time, never on the hour.
+    unwrapped = [t if t >= times[0] else t + 24 * 60 for t in times]
+    assert {b - a for a, b in zip(unwrapped, unwrapped[1:])} == {30}
+    assert all(t % 60 in (15, 45) for t in times)
+    # Forex Factory allows 2 downloads per 5 minutes: runs are never that close together.
+    assert min(b - a for a, b in zip(unwrapped, unwrapped[1:])) >= 5
 
 
-def test_run_type_comes_from_the_schedule_that_fired():
-    step = steps()["Decide which run this is"]
-    assert '"45 2 * * *") mode=morning ;;' in step
-    assert '"45 15 * * *") mode=evening ;;' in step
-    assert "*) mode=polling ;;" in step
-    assert '"") mode="${REQUESTED:-polling}" ;;' in step            # a manual start defaults to polling
-    assert "SCHEDULE: ${{ github.event.schedule }}" in step and "REQUESTED: ${{ inputs.mode }}" in step
-    assert "default: polling" in workflow_text(PRODUCTION)
+def test_every_window_has_several_scheduled_runs_so_one_dropped_trigger_is_harmless():
+    """GitHub may drop a scheduled run. Each duty must have later runs that would still perform it."""
+    times = india_minutes(re.findall(r'- cron: "([^"]+)"', workflow_text(PRODUCTION))[0])
+    moments = [datetime(2026, 10, 8, t // 60, t % 60, tzinfo=IST) for t in times]
+    morning = [m for m in moments if plan(m).morning]
+    evening = [m for m in moments if plan(m).evening]
+    assert len(morning) >= 10 and len(evening) >= 4
+    assert morning[0].strftime("%H:%M") == "08:15" and evening[0].strftime("%H:%M") == "21:15"
+    # Exactly one run in each window performs the destination check (keeps Whapi requests low).
+    assert [m.strftime("%H:%M") for m in moments if plan(m).check] == ["08:15", "21:15"]
+    # The US release hours (17:30 to 01:30 India time) are polled every half hour.
+    release_window = [m for m in moments if m.hour >= 18 or m.hour < 1]
+    assert len(release_window) >= 14
 
 
 def test_both_workflows_share_one_concurrency_group_and_never_cancel():
@@ -108,10 +120,109 @@ def test_both_workflows_share_one_concurrency_group_and_never_cancel():
         assert lines[start + 1:start + 3] == ["  group: market-news-automation", "  cancel-in-progress: false"], path.name
 
 
+# -- the run plan --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("moment, morning, evening, check", [
+    (at(7, 45), False, False, False),      # before the morning window: collect only
+    (at(8, 14), False, False, False),
+    (at(8, 15), True, False, True),        # window opens: brief + alerts, with the destination check
+    (at(8, 44), True, False, True),
+    (at(8, 45), True, False, False),       # later morning runs catch up without re-checking
+    (at(12, 0), True, False, False),
+    (at(15, 59), True, False, False),
+    (at(16, 0), False, False, False),      # too late in the day for a "morning" brief
+    (at(18, 15), False, False, False),     # polling: results only
+    (at(21, 14), False, False, False),
+    (at(21, 15), False, True, True),       # evening window: tomorrow's reminders
+    (at(21, 45), False, True, False),
+    (at(23, 59), False, True, False),
+    (at(0, 15), False, False, False),      # past midnight: tomorrow has become today
+    (at(1, 15), False, False, False),
+])
+def test_duties_follow_india_time(moment, morning, evening, check):
+    result = plan(moment)
+    assert (result.morning, result.evening, result.check) == (morning, evening, check)
+
+
+def test_plan_uses_india_time_whatever_zone_the_moment_is_given_in():
+    india = at(8, 15)
+    as_utc = india.astimezone(timezone.utc)                      # 02:45 UTC, still the 8th
+    as_la = india.astimezone(ZoneInfo("America/Los_Angeles"))    # the evening of the 7th there
+    assert as_utc.hour == 2 and as_la.day == 7
+    assert plan(india) == plan(as_utc) == plan(as_la) == RunPlan(True, False, True, "Thursday 2026-10-08 08:15")
+    # 20:00 UTC is 01:30 the next day in India: outside both windows.
+    assert plan(datetime(2026, 10, 7, 20, 0, tzinfo=timezone.utc)).india_time == "Thursday 2026-10-08 01:30"
+
+
+def test_a_late_or_repeated_run_still_does_the_morning_duties():
+    """If the 08:15 trigger is dropped, every later morning run performs the same duties."""
+    late = [at(8, 45), at(9, 15), at(11, 45), at(14, 15), at(15, 45)]
+    assert all(plan(m).morning for m in late)
+    assert not any(plan(m).evening for m in late)
+
+
+@pytest.mark.parametrize("requested, morning, evening", [
+    ("morning", True, False), ("evening", False, True), ("polling", False, False),
+])
+def test_a_manual_run_can_force_one_kind_of_run(requested, morning, evening):
+    for moment in (at(3, 0), at(12, 0), at(22, 0)):               # regardless of the time
+        result = plan(moment, requested=requested, manual=True)
+        assert (result.morning, result.evening, result.check) == (morning, evening, True)
+
+
+def test_a_manual_auto_run_follows_the_clock_and_always_checks_the_destination():
+    assert plan(at(12, 0), manual=True) == RunPlan(True, False, True, "Thursday 2026-10-08 12:00")
+    assert plan(at(18, 0), manual=True) == RunPlan(False, False, True, "Thursday 2026-10-08 18:00")
+    assert plan(at(18, 0), manual=False).check is False
+
+
+def test_unknown_request_is_rejected():
+    with pytest.raises(ValueError, match="requested must be one of"):
+        plan(at(12, 0), requested="hourly")
+
+
+def test_runplan_command_prints_outputs_for_the_workflow(monkeypatch, capsys, settings):
+    monkeypatch.setattr(runplan.Settings, "from_env", classmethod(lambda cls: settings))
+
+    class Clock(runplan.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 8, 2, 45, tzinfo=timezone.utc).astimezone(tz)      # 08:15 India time
+
+    monkeypatch.setattr(runplan, "datetime", Clock)
+    assert runplan.main([]) == 0
+    assert capsys.readouterr().out == "morning=true\nevening=false\ncheck=true\nindia_time=Thursday 2026-10-08 08:15\n"
+    assert runplan.main(["--requested", "", "--manual"]) == 0          # an empty input means auto
+    assert capsys.readouterr().out.startswith("morning=true\nevening=false\ncheck=true\n")
+    assert runplan.main(["--requested", "evening"]) == 0
+    assert capsys.readouterr().out.startswith("morning=false\nevening=true\ncheck=true\n")
+    assert runplan.main(["--requested", "weekly"]) == 2
+    assert "CONFIGURATION ERROR" in capsys.readouterr().err
+
+
+def test_runplan_reads_only_the_clock():
+    source = (PROJECT_ROOT / "src" / "runplan.py").read_text(encoding="utf-8")
+    for forbidden in ("urllib", "open_database", "whapi", "psycopg", "sqlite"):
+        assert forbidden not in source.casefold(), forbidden
+    assert "datetime.now(timezone.utc)" in source                     # never the machine's local time
+
+
+# -- steps ---------------------------------------------------------------------------------
+
+def test_the_plan_step_passes_the_request_and_the_trigger_safely():
+    step = steps()["Decide what this run should do"]
+    assert "REQUESTED: ${{ inputs.mode }}" in step and "EVENT_NAME: ${{ github.event_name }}" in step
+    assert 'python -m src.runplan --requested "${REQUESTED:-auto}" $manual | tee -a "$GITHUB_OUTPUT"' in step
+    assert 'if [ "$EVENT_NAME" = "workflow_dispatch" ]; then manual="--manual"; fi' in step
+    text = workflow_text(PRODUCTION)
+    assert "default: auto" in text
+    assert re.findall(r"^          - (\w+)$", text, flags=re.M) == ["auto", "polling", "morning", "evening"]
+
+
 def test_it_refreshes_and_enriches_before_any_send():
     all_steps = steps()
     assert list(all_steps) == [
-        "Check out the repository", "Set up Python", "Install dependencies", "Decide which run this is",
+        "Check out the repository", "Set up Python", "Install dependencies", "Decide what this run should do",
         "Preflight (reports PRESENT or MISSING, never a value)", "WhatsApp destination check (sends nothing)",
         "Refresh the calendar and look up released figures", "Send the morning update",
         "Send today's high-impact alerts", "Send newly released results", "Send tomorrow's reminders",
@@ -141,18 +252,18 @@ def test_it_sends_exactly_the_four_existing_messages_for_real():
     assert "timedelta(days=1)" in results and "ZoneInfo('Asia/Kolkata')" in results
 
 
-def test_each_send_runs_only_in_its_run_type_and_only_after_the_checks_passed():
+def test_each_send_runs_only_when_planned_and_only_after_the_checks_passed():
     all_steps = steps()
     expected = {
-        "Send the morning update": " && steps.mode.outputs.mode == 'morning'",
-        "Send today's high-impact alerts": " && steps.mode.outputs.mode == 'morning'",
+        "Send the morning update": " && steps.plan.outputs.morning == 'true'",
+        "Send today's high-impact alerts": " && steps.plan.outputs.morning == 'true'",
         "Send newly released results": "",
-        "Send tomorrow's reminders": " && steps.mode.outputs.mode == 'evening'",
+        "Send tomorrow's reminders": " && steps.plan.outputs.evening == 'true'",
     }
     for name, extra in expected.items():
         assert "if: ${{ " + GUARD + extra + " }}" in all_steps[name], name
     check = all_steps["WhatsApp destination check (sends nothing)"]
-    assert "if: steps.mode.outputs.mode != 'polling' || github.event_name == 'workflow_dispatch'" in check
+    assert "if: steps.plan.outputs.check == 'true'" in check
     assert commands(check) == ["python -m src.main --whatsapp-check"]
     assert commands(all_steps["Preflight (reports PRESENT or MISSING, never a value)"]) == ["python -m src.preflight --production"]
 
@@ -190,9 +301,19 @@ def test_secrets_are_only_referenced_never_written():
     assert not re.search(r"(printenv|env \||set -x|cat \.env)", "\n".join(code_lines(text)))
     all_steps = steps()
     assert "WHAPI_TOKEN" not in all_steps["Refresh the calendar and look up released figures"]
+    assert "secrets." not in all_steps["Decide what this run should do"]
     assert all("WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}" in t for n, t in all_steps.items() if n.startswith("Send "))
 
 
 def test_workflow_file_is_plain_spaces_with_unix_line_endings():
     raw = PRODUCTION.read_bytes()
     assert b"\t" not in raw and b"\r\n" not in raw
+
+
+def test_a_day_of_scheduled_runs_stays_inside_the_free_allowances():
+    """36 runs a day: about 1,100 runner-minutes a month at one minute each, and 4 Whapi check requests a day."""
+    times = india_minutes(re.findall(r'- cron: "([^"]+)"', workflow_text(PRODUCTION))[0])
+    assert len(times) * 31 <= 1200
+    checks = sum(plan(datetime(2026, 10, 8, t // 60, t % 60, tzinfo=IST)).check for t in times)
+    assert checks * 2 * 31 <= 150            # the destination check makes two API requests
+    assert timedelta(minutes=30) == timedelta(minutes=30)

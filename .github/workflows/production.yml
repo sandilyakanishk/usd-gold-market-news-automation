@@ -3,12 +3,19 @@
 #
 # GitHub cron is in UTC. India time (Asia/Kolkata) is UTC+5:30 all year.
 #
-#   cron (UTC)            India time                         run type
-#   45 2 * * *            08:15                              morning
-#   7,37 12-19 * * *      17:37, 18:07, ... 00:37, 01:07     polling (16 runs)
-#   45 15 * * *           21:15                              evening
+#   cron (UTC)            India time
+#   15,45 2-19 * * *      07:45, 08:15, 08:45 ... 00:45, 01:15   (36 runs a day)
 #
-# Scheduled runs can start late; GitHub does not guarantee the minute.
+# GitHub does not guarantee that a scheduled run starts on time, or at all.
+# So no job depends on one particular trigger. Every run works out what is
+# due from the India clock (src/runplan.py):
+#
+#   08:15 - 16:00 India time   daily brief and today's alerts
+#   21:15 - 24:00 India time   tomorrow's reminders
+#   every run                  collect, enrich, send newly released results
+#
+# The application never sends the same message twice, so a late run simply
+# catches up and an extra run does nothing.
 #
 # To stop the automation: Actions tab -> "Production" -> "..." -> Disable
 # workflow, or:  gh workflow disable production.yml
@@ -17,16 +24,15 @@ name: Production (sends WhatsApp messages)
 
 on:
   schedule:
-    - cron: "45 2 * * *"
-    - cron: "7,37 12-19 * * *"
-    - cron: "45 15 * * *"
+    - cron: "15,45 2-19 * * *"
   workflow_dispatch:
     inputs:
       mode:
-        description: "Which run to perform (polling: collect, enrich, send new results)"
+        description: "auto: decide from India time. Or force one kind of run."
         type: choice
-        default: polling
+        default: auto
         options:
+          - auto
           - polling
           - morning
           - evening
@@ -64,21 +70,15 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Decide which run this is
-        id: mode
+      - name: Decide what this run should do
+        id: plan
         env:
-          SCHEDULE: ${{ github.event.schedule }}
           REQUESTED: ${{ inputs.mode }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          case "$SCHEDULE" in
-            "45 2 * * *") mode=morning ;;
-            "45 15 * * *") mode=evening ;;
-            "") mode="${REQUESTED:-polling}" ;;
-            *) mode=polling ;;
-          esac
-          echo "mode=$mode" >> "$GITHUB_OUTPUT"
-          echo "Run type: $mode"
-          python -c "from datetime import datetime; from zoneinfo import ZoneInfo; print('India time:', datetime.now(ZoneInfo('Asia/Kolkata')).strftime('%A %Y-%m-%d %H:%M'))"
+          manual=""
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then manual="--manual"; fi
+          python -m src.runplan --requested "${REQUESTED:-auto}" $manual | tee -a "$GITHUB_OUTPUT"
 
       - name: Preflight (reports PRESENT or MISSING, never a value)
         id: preflight
@@ -92,11 +92,12 @@ jobs:
         run: python -m src.preflight --production
 
       # Confirms the WhatsApp session and that the destination is still the
-      # Community's Announcements group. Skipped on polling runs to stay
-      # within Whapi's request allowance; a failure here blocks every send.
+      # Community's Announcements group. To stay within Whapi's request
+      # allowance it runs once at the start of each window and on manual runs,
+      # not on every run. A failure here blocks every send.
       - name: WhatsApp destination check (sends nothing)
         id: destination
-        if: steps.mode.outputs.mode != 'polling' || github.event_name == 'workflow_dispatch'
+        if: steps.plan.outputs.check == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
@@ -121,7 +122,7 @@ jobs:
           exit $code
 
       - name: Send the morning update
-        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' && steps.mode.outputs.mode == 'morning' }}
+        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' && steps.plan.outputs.morning == 'true' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
@@ -129,7 +130,7 @@ jobs:
         run: python -m src.main --whatsapp-send-morning
 
       - name: Send today's high-impact alerts
-        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' && steps.mode.outputs.mode == 'morning' }}
+        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' && steps.plan.outputs.morning == 'true' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
@@ -150,7 +151,7 @@ jobs:
           python -m src.main --whatsapp-send-actuals --from "$since"
 
       - name: Send tomorrow's reminders
-        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' && steps.mode.outputs.mode == 'evening' }}
+        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' && steps.plan.outputs.evening == 'true' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}

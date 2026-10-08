@@ -927,40 +927,47 @@ used, and the only trigger is `workflow_dispatch`.
 `production.yml` runs on a schedule and can also be started by hand. GitHub
 cron is in UTC; India time is UTC+5:30 all year.
 
-| Run | India time | Cron (UTC) | Sends |
-| --- | --- | --- | --- |
-| Morning | 08:15 | `45 2 * * *` | the daily update, today's high-impact alerts, any new results |
-| Polling | 17:37, 18:07, ... 00:37, 01:07 (16 runs) | `7,37 12-19 * * *` | any new results |
-| Evening | 21:15 | `45 15 * * *` | tomorrow's reminders, any new results |
+| Cron (UTC) | India time | Runs a day |
+| --- | --- | --- |
+| `15,45 2-19 * * *` | 07:45, 08:15, 08:45 ... 00:45, 01:15 | 36 |
 
-That is 18 runs a day, none on the hour, and none during the hours when no
-US figure is released. Scheduled runs can start late; GitHub does not
-guarantee the minute.
+GitHub does not guarantee that a scheduled run starts on time, or at all, and
+dropped runs do happen. So no message depends on one particular trigger.
+Every run works out what is due from the India clock (`src/runplan.py`):
 
-Every run does the same things in the same order, using the existing
-commands:
+| India time | What the run does |
+| --- | --- |
+| any time | collects, enriches, sends newly released results |
+| 08:15 to 16:00 | also sends the daily brief and today's high-impact alerts |
+| 21:15 to 24:00 | also sends tomorrow's reminders |
 
-1. `python -m src.preflight --production` stops the run if a setting is missing.
-2. `--whatsapp-check` confirms the WhatsApp session and that the destination
-   is still the Community's Announcements group. It runs on morning, evening
-   and manual runs; polling runs skip it to stay within Whapi's request
-   allowance. If it fails, nothing is sent.
-3. `--enrich-actuals --week` downloads the Forex Factory calendar, stores and
+Because the application never sends the same message twice, a run that
+arrives late simply catches up, and the runs after it do nothing. If the
+08:15 run is dropped, the 08:45 run sends the brief instead.
+
+Each run uses the existing commands, in this order:
+
+1. `python -m src.runplan` reads the clock and decides the duties above.
+2. `python -m src.preflight --production` stops the run if a setting is missing.
+3. `--whatsapp-check` confirms the WhatsApp session and that the destination
+   is still the Community's Announcements group. To stay within Whapi's
+   request allowance it runs once at the start of each window (08:15 and
+   21:15) and on manual runs. If it fails, nothing is sent.
+4. `--enrich-actuals --week` downloads the Forex Factory calendar, stores and
    classifies it, and asks BLS and FRED for released figures.
-4. The sends for that run type:
-   - morning: `--whatsapp-send-morning`, then `--whatsapp-send-alert --today`
+5. The sends that are due:
+   - morning window: `--whatsapp-send-morning`, then `--whatsapp-send-alert --today`
    - every run: `--whatsapp-send-actuals --from <yesterday>`
-   - evening: `--whatsapp-send-upcoming --tomorrow`
+   - evening window: `--whatsapp-send-upcoming --tomorrow`
 
 Alerts are limited to today and reminders to tomorrow, so neither is ever
 posted for the whole week at once. Results reach back to yesterday (India
 time) so a figure released shortly before midnight is still picked up by the
-next run. A message that was already sent is skipped by the application, so
-running more often never produces a duplicate.
+next run.
 
-Started by hand, the workflow performs a polling run unless you pick
-`morning` or `evening`. It never forces a message: the same selection rules
-and duplicate check apply.
+Started by hand, the workflow follows the clock in the same way (`auto`), or
+you can force `morning`, `evening` or `polling`. It never forces a message:
+the same selection rules and duplicate check apply.
 
 **Failures.** A database error, a missing setting, a failed WhatsApp send or a
 failed destination check ends the run with an error. The application itself
@@ -1009,13 +1016,15 @@ waiting one is kept.
 - Results are posted by the first run after a figure is published, so they
   can arrive up to about half an hour after the release, or later if GitHub
   starts the run late.
-- Whapi's free Sandbox plan is listed at 1,000 API requests a month. A day of
-  this schedule uses about four for the destination checks plus one per
-  message sent.
+- Whapi's free Sandbox plan allows 1,000 API requests a month. A day of this
+  schedule uses four for the destination checks plus one per message sent.
+- 36 runs a day is roughly 1,100 to 1,500 runner minutes a month, inside the
+  2,000 a private repository gets on GitHub's free plan. Do not shorten the
+  interval without checking that budget.
 - Without a BLS key the BLS limit is 25 requests a day, counted against
   addresses shared with other GitHub users.
 - Forex Factory allows 2 downloads per 5 minutes, also counted per address.
-  No two runs are scheduled closer than eight minutes apart.
+  Runs are scheduled 30 minutes apart.
 
 ### Not built
 
