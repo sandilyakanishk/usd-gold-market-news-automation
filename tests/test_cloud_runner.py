@@ -32,7 +32,7 @@ def run_commands(text):
 # -- the workflow --------------------------------------------------------------------
 
 def test_exactly_the_expected_workflows_exist():
-    assert sorted(p.name for p in WORKFLOWS.iterdir()) == ["production.yml", "safe-test.yml"]
+    assert sorted(p.name for p in WORKFLOWS.iterdir()) == ["live-check.yml", "production.yml", "safe-test.yml"]
 
 
 def test_workflow_can_only_be_started_by_hand():

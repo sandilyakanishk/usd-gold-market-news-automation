@@ -86,6 +86,7 @@ class Settings:
     youtube_forward: str = "shorts"  # "shorts" or "all" (also long videos and live streams)
     video_posts_since: str = DEFAULT_VIDEO_POSTS_SINCE  # older uploads are never forwarded
     instagram_profile_url: str | None = None  # shown under every forwarded video
+    youtube_api_key: str | None = None  # YouTube Data API key for the live alert; secret, never logged
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -127,4 +128,5 @@ class Settings:
             youtube_forward=_youtube_forward(env("YOUTUBE_FORWARD") or "shorts"),
             video_posts_since=env("VIDEO_POSTS_SINCE") or DEFAULT_VIDEO_POSTS_SINCE,
             instagram_profile_url=(env("INSTAGRAM_PROFILE_URL") or "").strip() or None,
+            youtube_api_key=(env("YOUTUBE_API_KEY") or "").strip() or None,
         )

@@ -1,0 +1,64 @@
+# Live check: posts an alert to the Telegram channel when the YouTube channel
+# goes live.
+#
+# What starts it: an external timer (cron-job.org) calls GitHub's API every
+# minute, which starts this workflow. It does one thing and takes a few
+# seconds of work: ask YouTube whether a broadcast is on air, and post once
+# per broadcast. The application never announces the same stream twice.
+#
+# It has a concurrency group of its own, on purpose. In the production
+# workflow's group, a run arriving every minute would keep replacing the
+# production runs that are waiting their turn. Nothing here can clash with
+# production: this is the only place live alerts are sent, and its own group
+# keeps two live checks from running at once.
+#
+# It runs only when the repository variables TELEGRAM_ENABLED (true) and
+# YOUTUBE_CHANNEL_ID are set and the YOUTUBE_API_KEY secret exists.
+#
+# To stop it: disable the job on cron-job.org, or
+# Actions tab -> "Live check" -> "..." -> Disable workflow.
+
+name: Live check (alerts Telegram when the YouTube channel goes live)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: market-news-live-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATABASE_BACKEND: postgres
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      # A problem asking YouTube is retried a minute later, so it does not
+      # fail the run (a failing run every minute would only bury real news).
+      - name: Post an alert if the channel is live
+        if: ${{ vars.TELEGRAM_ENABLED == 'true' && vars.YOUTUBE_CHANNEL_ID != '' }}
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
+          INSTAGRAM_PROFILE_URL: ${{ vars.INSTAGRAM_PROFILE_URL }}
+        run: python -m src.main --telegram-send-live

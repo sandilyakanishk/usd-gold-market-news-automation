@@ -996,6 +996,39 @@ Not built yet: Instagram. The plan is one post per reel carrying both links,
 waiting up to 30 minutes for the matching reel on the other platform and
 posting with the one link if it does not appear.
 
+## Live alert (Telegram only)
+
+When the YouTube channel goes live, one alert is posted to Telegram:
+
+```
+🔴 WE ARE LIVE NOW!
+
+<the stream's title>
+
+▶️ Watch live: https://www.youtube.com/watch?v=...
+📸 Instagram: https://www.instagram.com/...
+
+🔔 The stream has just started. Tap the link to join.
+```
+
+```bash
+python -m src.main --telegram-send-live --dry-run   # show the alert if live, send nothing
+python -m src.main --telegram-send-live             # post it
+```
+
+- **How it knows.** YouTube's official Data API: the channel's ten newest
+  videos are looked up and one whose status is `live` is a broadcast on air.
+  Scheduled ("upcoming") and finished streams are ignored. This needs a free
+  API key, `YOUTUBE_API_KEY`, sent as a request header and never logged.
+- **Once per stream.** The broadcast's video id is the message identity
+  (`LIVE_YT_<id>`).
+- **Speed.** `.github/workflows/live-check.yml` is started every minute by a
+  second cron-job.org job, so the alert follows the start of a stream by
+  about one to three minutes.
+- **Quota.** Two API units per check, 2,880 a day of the free 10,000.
+- **Cover.** The stream's cover is uploaded with the alert if YouTube has
+  one at that moment; otherwise the alert goes out at once as a link post.
+
 ## Cloud runner (Step 6)
 
 The project runs on GitHub Actions, so it does not need your computer. There

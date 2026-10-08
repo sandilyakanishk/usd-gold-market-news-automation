@@ -45,7 +45,7 @@ FORWARD_MAX_AGE = timedelta(days=7)
 # How long a new video may wait for its cover image before it is posted without one.
 COVER_WAIT = timedelta(minutes=45)
 MIN_IMAGE_BYTES, MAX_IMAGE_BYTES = 5_000, 10 * 1024 * 1024
-_IMAGE_URL = re.compile(r"^https://i\d?\.ytimg\.com/vi/[A-Za-z0-9_-]{6,20}/[a-z0-9]+\.jpg$")
+_IMAGE_URL = re.compile(r"^https://i\d?\.ytimg\.com/vi/[A-Za-z0-9_-]{6,20}/[a-z0-9_]+\.jpg$")
 _CHANNEL_ID = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{6,20}$")
 _INSTAGRAM_PROFILE = re.compile(r"^https://(?:www\.)?instagram\.com/([A-Za-z0-9._]{1,30})/?(?:\?.*)?$")
