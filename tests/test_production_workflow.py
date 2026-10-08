@@ -21,7 +21,8 @@ TELEGRAM_GUARD = ("!cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.pref
 PRODUCTION = WORKFLOWS / "production.yml"
 IST = ZoneInfo("Asia/Kolkata")
 IST_OFFSET_MINUTES = 5 * 60 + 30
-GUARD = ("!cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' "
+GUARD = ("!cancelled() && vars.WHATSAPP_ENABLED == 'true' && steps.preflight.outcome == 'success' "
+         "&& steps.destination.outcome != 'failure' "
          "&& steps.collect.outcome == 'success'")
 
 
@@ -246,7 +247,7 @@ def test_each_send_runs_only_when_planned_and_only_after_the_checks_passed():
     for name, extra in expected.items():
         assert "if: ${{ " + GUARD + extra + " }}" in all_steps[name], name
     check = all_steps["WhatsApp destination check (sends nothing)"]
-    assert "if: steps.plan.outputs.check == 'true'" in check
+    assert "if: ${{ vars.WHATSAPP_ENABLED == 'true' && steps.plan.outputs.check == 'true' }}" in check
     assert commands(check) == ["python -m src.main --whatsapp-check"]
     assert commands(all_steps["Preflight (reports PRESENT or MISSING, never a value)"]) == ["python -m src.preflight --production"]
 
@@ -403,3 +404,20 @@ def test_the_market_pulse_goes_to_telegram_only_on_every_run():
     # WhatsApp never receives it: 48 posts a day would exhaust the Whapi allowance.
     assert "WHAPI_TOKEN" not in step and "pulse" not in "\n".join(t for n, t in all_steps.items() if not n.startswith("Telegram:"))
     assert [n for n, t in all_steps.items() if "continue-on-error" in t] == ["Telegram: send the market pulse"]
+
+
+# -- WhatsApp is opt-in --------------------------------------------------------------------
+
+def test_whatsapp_is_off_unless_the_repository_variable_enables_it():
+    """Every step that talks to Whapi is skipped unless WHATSAPP_ENABLED is 'true' (unset means off)."""
+    all_steps = steps()
+    whapi_steps = {n: t for n, t in all_steps.items() if "--whatsapp-" in t}
+    assert sorted(whapi_steps) == sorted([
+        "WhatsApp destination check (sends nothing)", "Send the morning update", "Send today's high-impact alerts",
+        "Send newly released results", "Send tomorrow's reminders"])
+    for name, text in whapi_steps.items():
+        assert "vars.WHATSAPP_ENABLED == 'true'" in text.split("env:")[0], name
+    # Telegram does not depend on WhatsApp in any way.
+    for name, text in all_steps.items():
+        if name.startswith("Telegram:"):
+            assert "WHATSAPP_ENABLED" not in text and "steps.destination" not in text, name

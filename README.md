@@ -1029,6 +1029,13 @@ used, and the only trigger is `workflow_dispatch`.
 
 ### The production workflow
 
+**WhatsApp is currently switched off.** Every WhatsApp step runs only when
+the repository variable `WHATSAPP_ENABLED` is `true`; it is not set, so the
+workflow posts to Telegram only. Nothing was removed: to send to a WhatsApp
+group again, put its ID in the `WHATSAPP_ANNOUNCEMENT_CHAT_ID` secret and run
+`gh variable set WHATSAPP_ENABLED --body true`. The WhatsApp secrets must
+stay in place meanwhile, because the preflight still checks for them.
+
 `production.yml` is started every 10 minutes, day and night, by an external
 timer: a free job on cron-job.org that calls GitHub's API
 (`POST .../actions/workflows/production.yml/dispatches` with a token that may

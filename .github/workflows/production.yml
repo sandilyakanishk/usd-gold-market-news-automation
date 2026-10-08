@@ -1,6 +1,9 @@
 # Production automation: collects the calendar, looks up released figures and
-# SENDS REAL WHATSAPP MESSAGES to the Community's Announcements group, and
-# the same messages to the Telegram channel when TELEGRAM_ENABLED is true.
+# SENDS REAL MESSAGES to the Telegram channel when the repository variable
+# TELEGRAM_ENABLED is true, and to the WhatsApp Community's Announcements
+# group when WHATSAPP_ENABLED is true. WhatsApp is currently switched off:
+# the variable is not set, so every WhatsApp step is skipped. To switch it
+# back on:  gh variable set WHATSAPP_ENABLED --body true
 #
 # What starts it: an external timer (cron-job.org) calls GitHub's API every
 # 10 minutes, day and night, which starts this workflow with mode "auto".
@@ -106,7 +109,7 @@ jobs:
       # like scheduled runs. A failure here blocks every send.
       - name: WhatsApp destination check (sends nothing)
         id: destination
-        if: steps.plan.outputs.check == 'true'
+        if: ${{ vars.WHATSAPP_ENABLED == 'true' && steps.plan.outputs.check == 'true' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
@@ -131,7 +134,7 @@ jobs:
           exit $code
 
       - name: Send the morning update
-        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' && steps.plan.outputs.morning == 'true' }}
+        if: ${{ !cancelled() && vars.WHATSAPP_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' && steps.plan.outputs.morning == 'true' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
@@ -139,7 +142,7 @@ jobs:
         run: python -m src.main --whatsapp-send-morning
 
       - name: Send today's high-impact alerts
-        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' }}
+        if: ${{ !cancelled() && vars.WHATSAPP_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
@@ -150,7 +153,7 @@ jobs:
       # figure released just before midnight is still picked up afterwards.
       # A message that was already sent is skipped by the application.
       - name: Send newly released results
-        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' }}
+        if: ${{ !cancelled() && vars.WHATSAPP_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
@@ -160,7 +163,7 @@ jobs:
           python -m src.main --whatsapp-send-actuals --from "$since"
 
       - name: Send tomorrow's reminders
-        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' && steps.plan.outputs.evening == 'true' }}
+        if: ${{ !cancelled() && vars.WHATSAPP_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' && steps.plan.outputs.evening == 'true' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
