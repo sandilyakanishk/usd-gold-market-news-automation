@@ -71,6 +71,8 @@ _D_UPSERT = (
     + ", ".join(f"{c} = excluded.{c}" for c in DELIVERY_COLUMNS if c not in _D_KEY + ("created_at",))
     + f" WHERE {DELIVERIES_TABLE}.status <> 'SENT'"
 )
+PRICES_TABLE = "price_snapshots"
+PRICE_COLUMNS = ("symbol", "slot", "price", "source", "source_updated_at", "recorded_at")
 _C_SELECT = f"SELECT {', '.join(CLASSIFICATION_COLUMNS)} FROM {CLASSIFICATION_TABLE}"
 _C_UPSERT = (
     f"INSERT INTO {CLASSIFICATION_TABLE} ({', '.join(CLASSIFICATION_COLUMNS)}) "
@@ -415,6 +417,37 @@ class EventRepository(ABC):
 
     def count_deliveries(self) -> int:
         return self._read(f"SELECT COUNT(*) AS n FROM {DELIVERIES_TABLE}")[0]["n"]
+
+    # -- price snapshots --------------------------------------------------------
+    # The price shown in each market-pulse post, keyed by its half-hour slot
+    # (an ISO UTC instant kept as text, so it sorts and compares as written).
+
+    def save_price_snapshot(self, symbol: str, slot: str, price: float, source: str,
+                            source_updated_at: str | None, recorded_at: str) -> None:
+        """Keep the price posted for a slot. The first price stored for a slot stays."""
+        with self._transaction():
+            self._write(
+                f"INSERT INTO {PRICES_TABLE} ({', '.join(PRICE_COLUMNS)}) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (symbol, slot) DO NOTHING",
+                (symbol, slot, float(price), source, source_updated_at, recorded_at))
+
+    def latest_price_snapshot(self, symbol: str, before_slot: str) -> dict | None:
+        """The most recent stored price of an earlier slot, or None."""
+        rows = self._read(
+            f"SELECT {', '.join(PRICE_COLUMNS)} FROM {PRICES_TABLE} WHERE symbol = ? AND slot < ? "
+            "ORDER BY slot DESC LIMIT 1", (symbol, before_slot))
+        if not rows:
+            return None
+        row = dict(rows[0])
+        row["price"] = float(row["price"])
+        return row
+
+    def delete_price_snapshots_before(self, symbol: str, slot: str) -> int:
+        with self._transaction():
+            return self._write(f"DELETE FROM {PRICES_TABLE} WHERE symbol = ? AND slot < ?", (symbol, slot))
+
+    def count_price_snapshots(self) -> int:
+        return self._read(f"SELECT COUNT(*) AS n FROM {PRICES_TABLE}")[0]["n"]
 
     # -- reads ------------------------------------------------------------------
 

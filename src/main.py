@@ -26,13 +26,14 @@ from .collector.parser import MalformedFeedError
 from .config import Settings
 from .database.base import DatabaseError
 from .database.factory import open_database
-from .delivery.models import OUTCOME_ALREADY_SENT, OUTCOME_DRY_RUN, OUTCOME_FAILED, OUTCOME_SENT
+from .delivery.models import OUTCOME_ALREADY_SENT, OUTCOME_DRY_RUN, OUTCOME_SENT
 from .delivery.models import DeliveryError
 from .delivery.service import (
     announcement_chat_id, build_telegram_client, build_whapi_client, deliver_message, deliver_telegram_message,
     send_telegram_test_message, send_test_message, telegram_chat_id,
 )
 from .delivery.telegram import describe_chat
+from . import pulse
 from .delivery.whapi import mask_chat_id
 from .filters.gold_usd_filters import USD
 from .pipeline import cleanup_old_events, sync
@@ -120,6 +121,8 @@ def build_parser() -> argparse.ArgumentParser:
     tg.add_argument("--telegram-send-alert", action="store_true", help="send high-impact alerts")
     tg.add_argument("--telegram-send-actuals", action="store_true", help="send result messages for released events")
     tg.add_argument("--telegram-send-upcoming", action="store_true", help="send reminders for upcoming high-priority events")
+    tg.add_argument("--telegram-send-pulse", action="store_true",
+                    help="send the half-hourly market pulse (gold price and next high-impact USD event)")
 
     p.add_argument("--json", action="store_true", help="print JSON instead of text")
     p.add_argument("--no-fetch", action="store_true", help="read the database only, no network")
@@ -498,6 +501,37 @@ def run_telegram_send(args: argparse.Namespace, settings: Settings, today: date)
         destination_text=f"telegram_channel ({describe_chat(chat_id)}) via telegram", id_label="Telegram message ID")
 
 
+def run_telegram_pulse(args: argparse.Namespace, settings: Settings, today: date) -> int:
+    """Post the market pulse for the current half-hour slot. Telegram only."""
+    chat_id = telegram_chat_id(settings)
+    client = None if args.dry_run else build_telegram_client(settings)
+    with open_database(settings) as db:
+        try:
+            result = pulse.send_pulse(db, client, settings, chat_id, dry_run=args.dry_run)
+        except pulse.PriceError as exc:
+            logging.getLogger(__name__).warning("Market pulse: %s", exc)
+            print(f"PRICE SOURCE ERROR: {exc} The pulse is retried on the next run.", file=sys.stderr)
+            return 1
+    if result.outcome == pulse.OUTCOME_MARKET_CLOSED:
+        print("The gold market is closed for the weekend. No pulse was sent.")
+        return 0
+    if result.outcome == pulse.OUTCOME_STALE_PRICE:
+        print("The price source has not updated recently. No pulse was sent.")
+        return 0
+    print(f"===== {result.message_key} | {pulse.MESSAGE_TYPE} =====")
+    print(f"Destination: telegram_channel ({describe_chat(chat_id)}) via telegram")
+    if result.outcome == OUTCOME_ALREADY_SENT:
+        print(f"Already sent — skipped. (sent {result.sent_at}, Telegram message ID {result.provider_message_id})")
+    elif result.outcome == OUTCOME_DRY_RUN:
+        print(f"DRY RUN: nothing is sent and nothing is recorded.\nWould send:\n{result.text}")
+    elif result.outcome == OUTCOME_SENT:
+        print(f"Sent. Telegram message ID: {result.provider_message_id}")
+    else:
+        print(f"FAILED: {result.error}")
+        return 1
+    return 0
+
+
 def run_preview(args: argparse.Namespace, settings: Settings, today: date) -> int:
     """Generate message text. Read-only: no sync, no classification run, no enrichment, no delivery."""
     kinds = dict(morning=args.preview_morning, alert=args.preview_alert, actuals=args.preview_actuals,
@@ -641,7 +675,7 @@ def main(argv: list[str] | None = None) -> int:
         print("--dry-run and --recheck-released only apply together with --enrich-actuals.", file=sys.stderr)
         return 2
     sending = wants_whatsapp_send(args) or wants_telegram_send(args)
-    if args.dry_run and not (args.enrich_actuals or sending):
+    if args.dry_run and not (args.enrich_actuals or sending or args.telegram_send_pulse):
         print("--dry-run and --recheck-released only apply together with --enrich-actuals "
               "(--dry-run also with a --whatsapp-send-... or --telegram-send-... option).", file=sys.stderr)
         return 2
@@ -664,6 +698,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_telegram_check(settings)
         if args.telegram_test:
             return run_telegram_test(settings)
+        if args.telegram_send_pulse:
+            return _guarded(run_telegram_pulse, "TELEGRAM", args, settings, today)
         if sending:
             # WhatsApp and Telegram are independent: one failing does not stop the other.
             codes = []

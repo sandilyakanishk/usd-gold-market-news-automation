@@ -19,6 +19,7 @@ from ..delivery.models import DeliveryRecord
 from .base import (
     ACTUALS_TABLE,
     DELIVERIES_TABLE,
+    PRICES_TABLE,
     CLASSIFICATION_TABLE,
     TABLE,
     DatabaseConfigError,
@@ -172,7 +173,7 @@ class PostgresRepository(EventRepository):
 
     def ensure_schema(self) -> None:
         """Raise SchemaMissingError unless the events table exists."""
-        for table in (TABLE, CLASSIFICATION_TABLE, ACTUALS_TABLE, DELIVERIES_TABLE):
+        for table in (TABLE, CLASSIFICATION_TABLE, ACTUALS_TABLE, DELIVERIES_TABLE, PRICES_TABLE):
             rows = self._read("SELECT to_regclass(?::text) AS oid", (table,))
             if rows[0]["oid"] is None:
                 raise SchemaMissingError(

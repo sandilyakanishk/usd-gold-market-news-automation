@@ -98,3 +98,18 @@ CREATE TABLE IF NOT EXISTS message_deliveries (
 );
 
 ALTER TABLE message_deliveries ENABLE ROW LEVEL SECURITY;
+
+-- The price shown in each market-pulse post, one row per half-hour slot.
+-- "slot" is an ISO UTC instant kept as text (2026-10-08T10:30:00Z), so it
+-- sorts and compares as written on every backend.
+CREATE TABLE IF NOT EXISTS price_snapshots (
+    symbol            TEXT             NOT NULL,    -- e.g. XAU
+    slot              TEXT             NOT NULL,
+    price             DOUBLE PRECISION NOT NULL CHECK (price > 0),
+    source            TEXT             NOT NULL,
+    source_updated_at TEXT,
+    recorded_at       TEXT             NOT NULL,
+    PRIMARY KEY (symbol, slot)
+);
+
+ALTER TABLE price_snapshots ENABLE ROW LEVEL SECURITY;

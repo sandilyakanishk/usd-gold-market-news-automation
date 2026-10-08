@@ -78,6 +78,16 @@ CREATE TABLE IF NOT EXISTS message_deliveries (
     updated_at          TEXT NOT NULL,
     PRIMARY KEY (message_key, provider, destination_id)
 );
+
+CREATE TABLE IF NOT EXISTS price_snapshots (
+    symbol            TEXT NOT NULL,
+    slot              TEXT NOT NULL,
+    price             REAL NOT NULL,
+    source            TEXT NOT NULL,
+    source_updated_at TEXT,
+    recorded_at       TEXT NOT NULL,
+    PRIMARY KEY (symbol, slot)
+);
 """
 
 

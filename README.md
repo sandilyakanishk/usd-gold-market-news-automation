@@ -912,6 +912,54 @@ no monthly request cap.
 If a value in a message would break Telegram's formatting, the same text is
 sent as plain text instead.
 
+## Market pulse (Telegram only)
+
+A short post every half hour while the gold market is open:
+
+```
+🟡 *GOLD MARKET PULSE*
+🗓 Thu, 8 Oct · 4:04 PM IST
+
+💰 *XAU/USD: $4,114.40*
+🔺 +$3.20 (+0.08%) since 3:30 PM
+
+⏭ *Next high-impact USD event*
+Unemployment Claims
+🕒 6:00 PM IST today · in 1h 56m
+
+ℹ️ Indicative price. Information only, not trading advice.
+```
+
+```bash
+python -m src.main --telegram-send-pulse --dry-run   # show the post, send nothing
+python -m src.main --telegram-send-pulse             # post it
+```
+
+- **Numbers only.** The price, how it moved since the previous post, and the
+  countdown to the next event. No view on direction; the text comes from a
+  fixed template in `src/pulse.py`.
+- **Price source.** `GOLD_PRICE_URL`, by default the free quote at
+  `api.gold-api.com` (no key). It is an indicative spot price, not a
+  tradable quote.
+- **Next event.** The nearest future high-impact USD event on the stored
+  calendar. In a week with none left, the nearest medium-impact one, labelled
+  as such. Low-impact events are never shown.
+- **Once per half hour.** The half-hour slot is the message identity
+  (`MARKET_PULSE_2026-10-08T1030Z`), so a run every 10 minutes still posts
+  once per slot, and the price source is asked once per slot.
+- **Quiet when there is nothing to say.** No post from Friday 21:00 UTC to
+  Sunday 22:00 UTC, or when the source's price is more than 45 minutes old.
+- **Telegram only.** 48 posts a day would exhaust Whapi's monthly request
+  allowance within weeks, so WhatsApp receives only the event messages.
+- **Failures.** If the price source is unavailable the post is skipped and
+  the next run tries again. In the workflow this step may fail without
+  failing the run.
+
+Each posted price is kept in the `price_snapshots` table (`symbol`, `slot`,
+`price`, `source`, `source_updated_at`, `recorded_at`) for 14 days; it is what
+the next post's change line compares with. The table is created by
+`python -m src.main --init-db`.
+
 ## Cloud runner (Step 6)
 
 The project runs on GitHub Actions, so it does not need your computer. There
@@ -997,6 +1045,7 @@ Every run works out what is due from the India clock (`src/runplan.py`):
 | any time | collects, enriches, sends today's high-impact alerts and newly released results |
 | 08:15 to 16:00 | also sends the daily brief |
 | 21:15 to 24:00 | also sends tomorrow's reminders |
+| every half hour, Monday to Friday | Telegram only: the market pulse |
 
 Because the application never sends the same message twice, a run that
 arrives late simply catches up, and the runs after it do nothing. If one run

@@ -38,6 +38,9 @@ def _retention_days(value: str) -> int:
     return days
 
 
+DEFAULT_GOLD_PRICE_URL = "https://api.gold-api.com/price/XAU"
+
+
 @dataclass(frozen=True)
 class Settings:
     feed_url: str
@@ -68,6 +71,7 @@ class Settings:
     whatsapp_announcement_chat_id: str | None = None
     telegram_bot_token: str | None = None  # secret, never logged
     telegram_chat_id: str | None = None  # "@channelname" or a numeric id
+    gold_price_url: str = DEFAULT_GOLD_PRICE_URL  # free XAU/USD quote for the market pulse; no key
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -103,4 +107,5 @@ class Settings:
             whatsapp_announcement_chat_id=env("WHATSAPP_ANNOUNCEMENT_CHAT_ID") or None,
             telegram_bot_token=env("TELEGRAM_BOT_TOKEN") or None,
             telegram_chat_id=env("TELEGRAM_CHAT_ID") or None,
+            gold_price_url=env("GOLD_PRICE_URL") or DEFAULT_GOLD_PRICE_URL,
         )
