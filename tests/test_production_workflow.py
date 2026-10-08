@@ -215,9 +215,11 @@ def test_runplan_reads_only_the_clock():
 
 def test_the_plan_step_passes_the_request_and_the_trigger_safely():
     step = steps()["Decide what this run should do"]
-    assert "REQUESTED: ${{ inputs.mode }}" in step and "EVENT_NAME: ${{ github.event_name }}" in step
-    assert 'python -m src.runplan --requested "${REQUESTED:-auto}" $manual | tee -a "$GITHUB_OUTPUT"' in step
-    assert 'if [ "$EVENT_NAME" = "workflow_dispatch" ]; then manual="--manual"; fi' in step
+    assert "REQUESTED: ${{ inputs.mode }}" in step
+    assert 'run: python -m src.runplan --requested "${REQUESTED:-auto}" | tee -a "$GITHUB_OUTPUT"' in step
+    # Runs started by the external timer are workflow_dispatch events. They must not be treated as
+    # "manual", or every one of them would spend Whapi requests on the destination check.
+    assert "--manual" not in step and "github.event_name" not in step
     text = workflow_text(PRODUCTION)
     assert "default: auto" in text
     assert re.findall(r"^          - (\w+)$", text, flags=re.M) == ["auto", "polling", "morning", "evening"]
@@ -370,3 +372,14 @@ def test_the_two_channels_are_independent_in_the_workflow():
             assert "TELEGRAM" not in text and "steps.telegram" not in text, name
     # A failed WhatsApp send does not skip Telegram: its steps use !cancelled(), not success().
     assert all("!cancelled()" in t for n, t in all_steps.items() if n.startswith("Telegram:"))
+
+
+def test_externally_triggered_runs_use_few_whapi_requests():
+    """A timer that starts the workflow every 30 minutes, all day, with the default 'auto' input."""
+    moments = [datetime(2026, 10, 8, h, m, tzinfo=IST) for h in range(24) for m in (0, 30)]
+    checks = [mo.strftime("%H:%M") for mo in moments if plan(mo, requested="auto", manual=False).check]
+    assert checks == ["08:30", "21:30"]                    # one per window
+    assert len(checks) * 2 * 31 <= 150                      # two API requests per check, per month
+    # Every 10 minutes changes nothing: still at most three runs fall in each 30-minute check slot.
+    dense = [datetime(2026, 10, 8, h, m, tzinfo=IST) for h in range(24) for m in range(0, 60, 10)]
+    assert sum(plan(mo).check for mo in dense) == 6

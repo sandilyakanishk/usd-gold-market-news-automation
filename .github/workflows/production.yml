@@ -76,11 +76,7 @@ jobs:
         id: plan
         env:
           REQUESTED: ${{ inputs.mode }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          manual=""
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then manual="--manual"; fi
-          python -m src.runplan --requested "${REQUESTED:-auto}" $manual | tee -a "$GITHUB_OUTPUT"
+        run: python -m src.runplan --requested "${REQUESTED:-auto}" | tee -a "$GITHUB_OUTPUT"
 
       - name: Preflight (reports PRESENT or MISSING, never a value)
         id: preflight
@@ -97,8 +93,10 @@ jobs:
 
       # Confirms the WhatsApp session and that the destination is still the
       # Community's Announcements group. To stay within Whapi's request
-      # allowance it runs once at the start of each window and on manual runs,
-      # not on every run. A failure here blocks every send.
+      # allowance it runs once at the start of each window (and whenever a
+      # run type is forced by hand), not on every run. Runs started by the
+      # external timer arrive as workflow_dispatch and are treated exactly
+      # like scheduled runs. A failure here blocks every send.
       - name: WhatsApp destination check (sends nothing)
         id: destination
         if: steps.plan.outputs.check == 'true'
