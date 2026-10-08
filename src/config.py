@@ -86,6 +86,9 @@ class Settings:
     video_posts_since: str = DEFAULT_VIDEO_POSTS_SINCE  # older uploads are never forwarded
     instagram_profile_url: str | None = None  # shown under every forwarded video
     youtube_api_key: str | None = None  # YouTube Data API key for the live alert; secret, never logged
+    gemini_api_key: str | None = None  # free AI writer for the education cards; secret, never logged
+    gemini_model: str = "gemini-2.5-flash"
+    content_library_path: Path = PROJECT_ROOT / "config" / "content_library.json"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -127,4 +130,7 @@ class Settings:
             video_posts_since=env("VIDEO_POSTS_SINCE") or DEFAULT_VIDEO_POSTS_SINCE,
             instagram_profile_url=(env("INSTAGRAM_PROFILE_URL") or "").strip() or None,
             youtube_api_key=(env("YOUTUBE_API_KEY") or "").strip() or None,
+            gemini_api_key=(env("GEMINI_API_KEY") or "").strip() or None,
+            gemini_model=(env("GEMINI_MODEL") or "gemini-2.5-flash").strip(),
+            content_library_path=_path(env("CONTENT_LIBRARY") or "config/content_library.json"),
         )

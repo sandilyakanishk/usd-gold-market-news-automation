@@ -33,7 +33,7 @@ from .delivery.service import (
     send_telegram_test_message, send_test_message, telegram_chat_id,
 )
 from .delivery.telegram import describe_chat
-from . import cards, live, pulse, social
+from . import cards, content_cards, live, pulse, social
 from .delivery.whapi import mask_chat_id
 from .filters.gold_usd_filters import USD
 from .pipeline import cleanup_old_events, sync
@@ -511,8 +511,13 @@ def run_telegram_scheduled(args: argparse.Namespace, settings: Settings, today: 
     """Record the gold price and post the scheduled cards that are due. Telegram only."""
     chat_id = telegram_chat_id(settings)
     client = None if args.dry_run else build_telegram_client(settings)
+    library = content_cards.load_library(settings.content_library_path)
+    now = cards.clock()
     with open_database(settings) as db:
-        results = cards.send_scheduled(db, client, settings, chat_id, dry_run=args.dry_run)
+        def content(slot):
+            return content_cards.send_content_card(db, client, settings, chat_id, slot, library, now=now, dry_run=args.dry_run)
+        results = cards.send_scheduled(db, client, settings, chat_id, now=now, dry_run=args.dry_run,
+                                       extra_cards={cards.CORNER: content, cards.LEARN: content})
     if args.dry_run:
         print("DRY RUN: nothing is sent and nothing is recorded.\n")
     if not results:
@@ -820,7 +825,7 @@ def main(argv: list[str] | None = None) -> int:
         if run_maintenance(args, settings, today):
             return 0
         return run_report(args, settings, today)
-    except (RulesConfigError, MappingConfigError, TemplateConfigError, HeadlineConfigError) as exc:
+    except (RulesConfigError, MappingConfigError, TemplateConfigError, HeadlineConfigError, content_cards.ContentError) as exc:
         logging.getLogger(__name__).error("Configuration file error: %s", exc)
         print(f"CONFIGURATION ERROR: {exc}", file=sys.stderr)
         return 2

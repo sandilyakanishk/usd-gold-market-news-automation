@@ -14,7 +14,7 @@ from src.delivery.models import DeliveryError
 IST = ZoneInfo("Asia/Kolkata")
 CHAT = "@example_channel"
 SETTINGS = SimpleNamespace(gold_price_url="https://prices.example.test/XAU", request_timeout_seconds=5,
-                           user_agent="test-agent", display_timezone="Asia/Kolkata")
+                           user_agent="test-agent", display_timezone="Asia/Kolkata", fred_api_key=None)
 THURSDAY, FRIDAY, SATURDAY, MONDAY = date(2026, 10, 8), date(2026, 10, 9), date(2026, 10, 10), date(2026, 10, 12)
 
 
@@ -98,7 +98,7 @@ def test_quiet_hours_and_grace():
 
 
 def test_a_run_every_ten_minutes_posts_every_card_exactly_once(db):
-    record_day(db, date(2026, 10, 7), [4000 + i for i in range(40)])
+    record_day(db, date(2026, 10, 7), [4000 + i for i in range(80)])
     client = FakeTelegram()
     moment, posted = ist(THURSDAY, 0, 3), []
     while moment.date() == THURSDAY:
@@ -134,7 +134,7 @@ def test_a_price_that_stopped_updating_is_not_recorded_or_posted(db):
 
 
 def test_a_price_source_failure_does_not_stop_the_other_cards(db):
-    record_day(db, date(2026, 10, 7), [4000 + i for i in range(40)])
+    record_day(db, date(2026, 10, 7), [4000 + i for i in range(80)])
 
     def broken(url, **_):
         raise pulse.PriceError("The gold price source answered HTTP 503.")
@@ -209,6 +209,10 @@ def test_key_levels_use_the_last_trading_day_and_wait_if_there_is_none(db):
     db.save_daily_price("XAU", "2026-10-09", 4100, 4130, 4090, 4110, 80)      # Friday
     assert run(db, client, ist(MONDAY, 8, 45))[0].outcome == cards.OUTCOME_SENT
     assert "from Friday's range" in client.sent[0] and "Mon, 12 Oct" in client.sent[0]
+    # A day that was only partly recorded is not presented as that day's range.
+    with SQLiteRepository(":memory:") as partial:
+        partial.save_daily_price("XAU", "2026-10-09", 4100, 4130, 4090, 4110, 30)
+        assert run(partial, FakeTelegram(), ist(MONDAY, 8, 35))[0].outcome == cards.OUTCOME_NOT_READY
     # A summary from long ago is not presented as "the" key levels.
     with SQLiteRepository(":memory:") as other:
         other.save_daily_price("XAU", "2026-10-01", 4100, 4130, 4090, 4110, 80)
@@ -270,7 +274,7 @@ def test_the_pulse_compares_with_the_price_two_hours_earlier(db):
 
 
 def test_no_card_reads_like_a_trading_signal(db):
-    record_day(db, date(2026, 10, 7), [4000 + 3 * i for i in range(40)])
+    record_day(db, date(2026, 10, 7), [4000 + 3 * i for i in range(80)])
     record_day(db, THURSDAY, [4100 + i for i in range(20)], start_hour=10)
     client = FakeTelegram()
     for hour, minute in ((8, 35), (13, 5), (23, 55)):
@@ -314,8 +318,11 @@ def test_cli_dry_run(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "events.db"))
     monkeypatch.setenv("LOG_PATH", str(tmp_path / "log.txt"))
     monkeypatch.setenv("TELEGRAM_CHAT_ID", CHAT)
+    monkeypatch.setenv("FRED_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
+    monkeypatch.setattr(cards, "clock", lambda: ist(THURSDAY, 9, 2))
     monkeypatch.setattr(cards.send_scheduled, "__kwdefaults__",
-                        {**cards.send_scheduled.__kwdefaults__, "now": ist(THURSDAY, 9, 2), "fetch": fetch_at(4100.0, ist(THURSDAY, 9, 2))})
+                        {**cards.send_scheduled.__kwdefaults__, "fetch": fetch_at(4100.0, ist(THURSDAY, 9, 2))})
     assert cli.main(["--telegram-send-scheduled", "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "DRY RUN" in out and "MARKET_PULSE_2026-10-08_0900" in out and "GOLD MARKET PULSE" in out

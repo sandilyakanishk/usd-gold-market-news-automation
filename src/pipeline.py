@@ -129,7 +129,7 @@ def cleanup_old_events(settings: Settings, db: EventRepository, today: date | No
 
 # Records that must outlive the day they were made, because the thing they describe can still come up the
 # next day: a reel stays in YouTube's feed, a result is looked for from yesterday onward, a stream can run on.
-TWO_DAY_TYPES = ("HIGH_ALERT", "ACTUAL_RESULT", "UPCOMING_REMINDER", "VIDEO_POST", "LIVE_ALERT")
+TWO_DAY_TYPES = ("HIGH_ALERT", "ACTUAL_RESULT", "UPCOMING_REMINDER", "VIDEO_POST", "LIVE_ALERT", "NEWS_COUNTDOWN")
 # The day's first message goes out at this time; the previous day's records are deleted from then on.
 CLEANUP_FROM = clock_time(8, 15)
 

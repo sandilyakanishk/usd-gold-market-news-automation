@@ -42,6 +42,15 @@ log = logging.getLogger(__name__)
 
 SYMBOL = pulse.SYMBOL
 PULSE, CORNER, KEY_LEVELS, DRIVERS, LEARN, RECAP = "MARKET_PULSE", "TRADER_CORNER", "KEY_LEVELS", "GOLD_DRIVERS", "LEARN_CARD", "DAILY_RECAP"
+COUNTDOWN = "NEWS_COUNTDOWN"
+# A countdown goes out when a high-impact USD release is this many minutes away.
+COUNTDOWN_FROM, COUNTDOWN_UNTIL = 35, 5
+# The official daily US figures shown on the "what's moving gold" card: (FRED series, label, unit, decimals).
+DRIVER_SERIES = (
+    ("DTWEXBGS", "💵 US dollar index (broad)", "", 2),
+    ("DGS10", "📈 US 10-year bond yield", "%", 2),
+    ("DFEDTARU", "🏦 Fed interest rate (upper limit)", "%", 2),
+)
 PULSE_HOURS = (9, 11, 13, 15, 17, 19, 21, 23)
 # One hour after each pulse; the kind of card rotates through the day.
 CORNER_SLOTS = ((10, "quiz"), (12, "rule"), (14, "fact"), (16, "myth"), (18, "quiz"), (20, "rule"), (22, "fact"))
@@ -51,6 +60,7 @@ MARKET_DAY_ONLY = (PULSE, KEY_LEVELS, DRIVERS, RECAP)
 GRACE = timedelta(minutes=50)
 SAMPLE_MINUTES = 10
 MIN_SAMPLES = 6  # fewer recorded prices than this do not describe a day
+MIN_LEVEL_SAMPLES = 72  # key levels need most of a day (12 hours of 10-minute prices), or the range would mislead
 KEEP_DAILY = 10  # days of daily summaries kept for the key levels
 OUTCOME_NOT_READY = "NOT_READY"
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
@@ -76,6 +86,11 @@ class CardResult:
     text: str | None = None
     provider_message_id: str | None = None
     detail: str | None = None
+
+
+def clock() -> datetime:
+    """The current moment. One place, so a whole run agrees on what time it is."""
+    return datetime.now(timezone.utc)
 
 
 # -- timetable ------------------------------------------------------------------------------
@@ -204,6 +219,60 @@ def build_recap(today: date, summary: dict) -> str:
     ])
 
 
+def build_countdown(event, instant: datetime, now: datetime, tz: ZoneInfo | timezone) -> str:
+    minutes = max(1, round((instant - now).total_seconds() / 60))
+    when = instant.astimezone(tz)
+    lines = [
+        f"⏰ *NEWS IN {minutes} MINUTES*",
+        "",
+        f"*{event.event_name}*",
+        f"USD · {event.impact.lower()} impact · {pulse._clock(when)} {when.strftime('%Z') or 'UTC'}",
+    ]
+    figures = [f"{label}: {value}" for label, value in (("Forecast", event.forecast), ("Previous", event.previous)) if value]
+    if figures:
+        lines += ["", "   ".join(figures)]
+    lines += ["", "⚠️ Prices can move fast and spreads can widen around the release.", "ℹ️ Information only, not trading advice."]
+    return "\n".join(lines)
+
+
+def _move(latest, earlier, unit: str, decimals: int) -> str:
+    change = round(float(latest) - float(earlier), decimals)
+    if change == 0:
+        return "▪️ unchanged"
+    return f"{'🔺 +' if change > 0 else '🔻 -'}{abs(change):.{decimals}f}{unit}"
+
+
+def build_drivers(today: date, readings: list[tuple]) -> str:
+    """`readings`: (label, unit, decimals, latest date, latest value, previous value or None) per figure."""
+    lines = [f"🧭 *WHAT'S MOVING GOLD* · {pulse._day(datetime.combine(today, time(0)))}", "Latest official US figures", ""]
+    for label, unit, decimals, day, latest, earlier in readings:
+        move = f"  {_move(latest, earlier, unit, decimals)}" if earlier is not None else ""
+        lines.append(f"{label}\n   {float(latest):,.{decimals}f}{unit}{move}  ({day.day} {day.strftime('%b')})")
+    lines += ["", "_A stronger dollar and higher yields have usually weighed on gold, and the reverse has usually supported it._",
+              "ℹ️ Published once a day by FRED, so a day or more old. Not trading advice."]
+    return "\n".join(lines)
+
+
+def read_drivers(settings: Settings, today: date, *, provider=None) -> list[tuple]:
+    """The latest two published values of each figure, from FRED. Raises ProviderError if they cannot be had."""
+    from .actuals.providers import FREDProvider, ProviderError, SeriesRequest
+    provider = provider or FREDProvider(settings.fred_api_key, timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
+    reason = provider.unavailable_reason()
+    if reason:
+        raise ProviderError(reason)
+    observations = provider.fetch([SeriesRequest(series, today - timedelta(days=45), today) for series, *_ in DRIVER_SERIES])
+    readings = []
+    for series, label, unit, decimals in DRIVER_SERIES:
+        days = sorted(observations.get(series) or {})
+        if not days:
+            continue
+        values = observations[series]
+        readings.append((label, unit, decimals, days[-1], values[days[-1]], values[days[-2]] if len(days) > 1 else None))
+    if not readings:
+        raise ProviderError("FRED returned no recent figures.")
+    return readings
+
+
 # -- sending --------------------------------------------------------------------------------
 
 def _already(db: EventRepository, key: str, chat_id: str):
@@ -234,8 +303,8 @@ def _pulse_card(db, client, settings, chat_id, slot, quote, *, now, tz, dry_run)
 def _key_levels_card(db, client, chat_id, slot, *, now, tz, dry_run) -> CardResult:
     today = now.astimezone(tz).date()
     daily = db.latest_daily_price(SYMBOL, today.isoformat())
-    if daily is None or (today - date.fromisoformat(daily["day"])).days > 4:
-        return CardResult(KEY_LEVELS, OUTCOME_NOT_READY, slot.message_key, detail="no recent day of recorded prices yet")
+    if daily is None or (today - date.fromisoformat(daily["day"])).days > 4 or daily["samples"] < MIN_LEVEL_SAMPLES:
+        return CardResult(KEY_LEVELS, OUTCOME_NOT_READY, slot.message_key, detail="no full recent day of recorded prices yet")
     return _post(db, client, chat_id, slot, build_key_levels(today, daily), dry_run=dry_run, now=now)
 
 
@@ -248,15 +317,54 @@ def _recap_card(db, client, chat_id, slot, *, now, tz, dry_run) -> CardResult:
     return _post(db, client, chat_id, slot, build_recap(today, summary), dry_run=dry_run, now=now)
 
 
+def _drivers_card(db, client, settings, chat_id, slot, *, now, tz, dry_run, provider=None) -> CardResult:
+    from .actuals.providers import ProviderError
+    today = now.astimezone(tz).date()
+    try:
+        readings = read_drivers(settings, today, provider=provider)
+    except ProviderError as exc:
+        return CardResult(DRIVERS, OUTCOME_NOT_READY, slot.message_key, detail=str(exc))
+    return _post(db, client, chat_id, slot, build_drivers(today, readings), dry_run=dry_run, now=now)
+
+
+def _countdowns(db, client, chat_id, *, now, tz, dry_run) -> list[CardResult]:
+    """One reminder per high-impact USD release that is about half an hour away."""
+    results = []
+    since = (now.astimezone(tz) - timedelta(days=1)).date().isoformat()
+    for event in db.query_events(currency="USD", impacts=["High"], date_from=since):
+        if not event.datetime_utc:
+            continue
+        try:
+            instant = datetime.fromisoformat(event.datetime_utc.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if instant.tzinfo is None:
+            instant = instant.replace(tzinfo=timezone.utc)
+        minutes = (instant - now).total_seconds() / 60
+        if not (COUNTDOWN_UNTIL <= minutes <= COUNTDOWN_FROM):
+            continue
+        key = f"{COUNTDOWN}_{event.event_id}"
+        if _already(db, key, chat_id) is not None:
+            results.append(CardResult(COUNTDOWN, OUTCOME_ALREADY_SENT, key))
+            continue
+        text = build_countdown(event, instant, now, tz)
+        result = deliver_text(
+            db, client, message_key=key, message_type=COUNTDOWN, text=text, chat_id=chat_id, dry_run=dry_run, now=now,
+            provider=PROVIDER_TELEGRAM, destination=DESTINATION_TELEGRAM_CHANNEL, send_options={"markdown": True},
+            label=describe_chat(chat_id))
+        results.append(CardResult(COUNTDOWN, result.outcome, key, text, result.provider_message_id, result.error))
+    return results
+
+
 def send_scheduled(db: EventRepository, client: TelegramClient | None, settings: Settings, chat_id: str, *,
                    now: datetime | None = None, dry_run: bool = False, fetch=pulse.fetch_gold_price,
-                   extra_cards: dict | None = None) -> list[CardResult]:
+                   extra_cards: dict | None = None, drivers_provider=None) -> list[CardResult]:
     """Record the price, then post every card that is due and not yet posted.
 
     `extra_cards` maps a card kind to a function (slot) -> CardResult for the
-    kinds built elsewhere (trader's corner, learn card, what's moving gold).
+    kinds built elsewhere (trader's corner and learn card, in content_cards).
     """
-    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    now = (now or clock()).astimezone(timezone.utc)
     tz = ZoneInfo(settings.display_timezone) if settings.display_timezone else timezone.utc
     results: list[CardResult] = []
 
@@ -275,6 +383,8 @@ def send_scheduled(db: EventRepository, client: TelegramClient | None, settings:
     if not dry_run and now.astimezone(tz).time() >= time(8, 15):
         roll_prices(db, now, tz)
 
+    results += _countdowns(db, client, chat_id, now=now, tz=tz, dry_run=dry_run)
+
     for slot in due_slots(now, tz):
         if _already(db, slot.message_key, chat_id) is not None:
             results.append(CardResult(slot.kind, OUTCOME_ALREADY_SENT, slot.message_key))
@@ -285,6 +395,9 @@ def send_scheduled(db: EventRepository, client: TelegramClient | None, settings:
             results.append(_key_levels_card(db, client, chat_id, slot, now=now, tz=tz, dry_run=dry_run))
         elif slot.kind == RECAP:
             results.append(_recap_card(db, client, chat_id, slot, now=now, tz=tz, dry_run=dry_run))
+        elif slot.kind == DRIVERS:
+            results.append(_drivers_card(db, client, settings, chat_id, slot, now=now, tz=tz, dry_run=dry_run,
+                                         provider=drivers_provider))
         elif extra_cards and slot.kind in extra_cards:
             results.append(extra_cards[slot.kind](slot))
         else:
@@ -293,7 +406,7 @@ def send_scheduled(db: EventRepository, client: TelegramClient | None, settings:
 
 
 __all__ = [
-    "CORNER", "CardResult", "DRIVERS", "GRACE", "KEY_LEVELS", "LEARN", "OUTCOME_ALREADY_SENT", "OUTCOME_DRY_RUN",
+    "CORNER", "COUNTDOWN", "CardResult", "DRIVERS", "build_countdown", "build_drivers", "read_drivers", "GRACE", "KEY_LEVELS", "LEARN", "OUTCOME_ALREADY_SENT", "OUTCOME_DRY_RUN",
     "OUTCOME_FAILED", "OUTCOME_NOT_READY", "OUTCOME_SENT", "PULSE", "RECAP", "Slot", "build_key_levels", "build_recap",
     "day_bounds", "due_slots", "pivot_levels", "record_price", "roll_prices", "sample_slot", "send_scheduled",
     "slots_for", "summarize",

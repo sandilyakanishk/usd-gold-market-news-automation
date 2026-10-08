@@ -944,6 +944,41 @@ records the gold price, then posts whichever card is due (India time):
 - A card that has no data yet (for example the first morning) is skipped,
   not invented.
 
+- **What's moving gold** shows the latest published value, and the change
+  from the one before, of three FRED series: the broad US dollar index
+  (`DTWEXBGS`), the 10-year Treasury yield (`DGS10`) and the upper limit of
+  the Fed funds target (`DFEDTARU`). FRED publishes them daily with a lag,
+  so each line carries its own date. Needs `FRED_API_KEY`.
+- **News countdown.** Outside the timetable: when a high-impact USD release
+  is 35 to 5 minutes away, one reminder is posted with its forecast and
+  previous figures. It also posts during quiet hours.
+
+### Trader's corner and learn card
+
+Five kinds of education card: a quiz (a real Telegram quiz poll), a trader's
+rule, a gold fact, a myth, and a three-point lesson. The trader's corner
+rotates through the first four during the day; the learn card is the lesson.
+
+Where the words come from:
+
+1. **A free AI writer**, if `GEMINI_API_KEY` is set (Google Gemini,
+   `GEMINI_MODEL`). It is asked for one new item on a subject that rotates
+   through a list of 60, and is told what was used lately.
+2. **The written library**, `config/content_library.json` (108 items), taken
+   in order with a bookmark per kind in the `content_state` table. It is used
+   when there is no key, when the AI is unavailable or over its free limit,
+   and when the AI's text fails a check. So a card always goes out.
+
+Every item from either source passes the same checks before posting: the
+right shape and length, and no trade recommendation, price prediction,
+promise of profit, link or contact detail (`content_cards.validate`). The
+library is checked the same way when it is loaded.
+
+This is the only place an AI is involved. News, results, prices, key levels,
+the recap and the countdown are real figures in fixed templates. The checks
+catch advice and bad formatting; they cannot catch every factual slip in an
+AI-written card, and nobody reviews a card before it posts.
+
 The timetable lives in `src/cards.py`.
 
 ### Market pulse

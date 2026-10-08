@@ -212,3 +212,27 @@ class TelegramClient:
             raise TelegramError("Telegram did not confirm the message: no message id was returned.")
         log.info("Telegram: photo accepted for %s (id %s)", describe_chat(chat_id), message_id)
         return str(message_id)
+
+    def send_quiz(self, chat_id: str, question: str, options: list[str], correct: int, explanation: str = "") -> str:
+        """Post a quiz poll: readers tap an answer and see whether it was right. Returns Telegram's message id."""
+        if not chat_id or not str(chat_id).strip():
+            raise TelegramConfigError("TELEGRAM_CHAT_ID is not set. Add it to the environment or to .env.")
+        if not isinstance(question, str) or not (1 <= len(question.strip()) <= 300):
+            raise TelegramMessageError("A quiz question must have 1 to 300 characters.")
+        if not isinstance(options, list) or not (2 <= len(options) <= 10) \
+                or any(not isinstance(o, str) or not (1 <= len(o.strip()) <= 100) for o in options):
+            raise TelegramMessageError("A quiz needs 2 to 10 options of 1 to 100 characters each.")
+        if isinstance(correct, bool) or not isinstance(correct, int) or not (0 <= correct < len(options)):
+            raise TelegramMessageError("The correct option must be one of the options.")
+        if len(explanation) > 200:
+            raise TelegramMessageError("A quiz explanation may have at most 200 characters.")
+        payload = {"chat_id": chat_id, "question": question, "options": [{"text": o} for o in options],
+                   "type": "quiz", "correct_option_id": correct, "is_anonymous": True}
+        if explanation.strip():
+            payload["explanation"] = explanation
+        result = self._call("sendPoll", payload)
+        message_id = result.get("message_id") if isinstance(result, dict) else None
+        if message_id is None:
+            raise TelegramError("Telegram did not confirm the message: no message id was returned.")
+        log.info("Telegram: quiz accepted for %s (id %s)", describe_chat(chat_id), message_id)
+        return str(message_id)
