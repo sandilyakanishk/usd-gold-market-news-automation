@@ -11,9 +11,10 @@
 # So no job depends on one particular trigger. Every run works out what is
 # due from the India clock (src/runplan.py):
 #
-#   08:15 - 16:00 India time   daily brief and today's alerts
+#   08:15 - 16:00 India time   daily brief
 #   21:15 - 24:00 India time   tomorrow's reminders
-#   every run                  collect, enrich, send newly released results
+#   every run                  collect, enrich, send today's high-impact alerts
+#                              and newly released results
 #
 # The application never sends the same message twice, so a late run simply
 # catches up and an extra run does nothing.
@@ -133,7 +134,7 @@ jobs:
         run: python -m src.main --whatsapp-send-morning
 
       - name: Send today's high-impact alerts
-        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' && steps.plan.outputs.morning == 'true' }}
+        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.destination.outcome != 'failure' && steps.collect.outcome == 'success' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
@@ -184,7 +185,7 @@ jobs:
         run: python -m src.main --telegram-send-morning
 
       - name: "Telegram: send today's high-impact alerts"
-        if: ${{ !cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.collect.outcome == 'success' && steps.telegram.outcome == 'success' && steps.plan.outputs.morning == 'true' }}
+        if: ${{ !cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.collect.outcome == 'success' && steps.telegram.outcome == 'success' }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

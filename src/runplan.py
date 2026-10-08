@@ -4,9 +4,9 @@ GitHub does not guarantee that a scheduled run starts on time, or at all. So
 the duties of a run are not tied to which trigger fired; they follow from the
 current India time:
 
-    morning window   08:15 - 16:00   send the daily brief and today's alerts
+    morning window   08:15 - 16:00   send the daily brief
     evening window   21:15 - 24:00   send tomorrow's reminders
-    every run                         collect, enrich, send new results
+    every run                         collect, enrich, send today's alerts and new results
 
 Every send is skipped by the application if it was already made, so a run that
 arrives late simply catches up and a run that arrives twice does nothing.

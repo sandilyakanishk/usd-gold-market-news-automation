@@ -994,8 +994,8 @@ Every run works out what is due from the India clock (`src/runplan.py`):
 
 | India time | What the run does |
 | --- | --- |
-| any time | collects, enriches, sends newly released results |
-| 08:15 to 16:00 | also sends the daily brief and today's high-impact alerts |
+| any time | collects, enriches, sends today's high-impact alerts and newly released results |
+| 08:15 to 16:00 | also sends the daily brief |
 | 21:15 to 24:00 | also sends tomorrow's reminders |
 
 Because the application never sends the same message twice, a run that
@@ -1013,8 +1013,8 @@ Each run uses the existing commands, in this order:
 4. `--enrich-actuals --week` downloads the Forex Factory calendar, stores and
    classifies it, and asks BLS and FRED for released figures.
 5. The sends that are due:
-   - morning window: `--whatsapp-send-morning`, then `--whatsapp-send-alert --today`
-   - every run: `--whatsapp-send-actuals --from <yesterday>`
+   - morning window: `--whatsapp-send-morning`
+   - every run: `--whatsapp-send-alert --today` and `--whatsapp-send-actuals --from <yesterday>`
    - evening window: `--whatsapp-send-upcoming --tomorrow`
 
 Alerts are limited to today and reminders to tomorrow, so neither is ever

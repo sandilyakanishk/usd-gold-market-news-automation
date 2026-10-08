@@ -262,7 +262,7 @@ def test_each_send_runs_only_when_planned_and_only_after_the_checks_passed():
     all_steps = steps()
     expected = {
         "Send the morning update": " && steps.plan.outputs.morning == 'true'",
-        "Send today's high-impact alerts": " && steps.plan.outputs.morning == 'true'",
+        "Send today's high-impact alerts": "",          # every run: an alert is not tied to a time of day
         "Send newly released results": "",
         "Send tomorrow's reminders": " && steps.plan.outputs.evening == 'true'",
     }
@@ -352,7 +352,7 @@ def test_telegram_is_off_unless_the_repository_variable_enables_it():
     assert "id: telegram" in check and commands(check) == ["python -m src.main --telegram-check"]
     expected = {
         "Telegram: send the morning update": " && steps.plan.outputs.morning == 'true'",
-        "Telegram: send today's high-impact alerts": " && steps.plan.outputs.morning == 'true'",
+        "Telegram: send today's high-impact alerts": "",
         "Telegram: send newly released results": "",
         "Telegram: send tomorrow's reminders": " && steps.plan.outputs.evening == 'true'",
     }
