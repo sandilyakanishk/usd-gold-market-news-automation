@@ -58,6 +58,22 @@ TOPICS = (
     "the gold-silver ratio",
 )
 
+# A trader's rule is about conduct, so it draws only on the subjects that are.
+RULE_TOPICS = tuple(t for t in TOPICS if t in (
+    "risk management", "position sizing", "stop-loss orders", "leverage and margin", "spreads and trading costs",
+    "trading psychology", "keeping a trading journal", "building a trading plan", "demo accounts and practice",
+    "common beginner mistakes", "avoiding scams and false promises", "risk-to-reward ratio", "drawdowns and recovery",
+    "overtrading", "trading around news releases", "weekend gaps", "backtesting an idea", "patience and discipline",
+    "protecting capital", "economic calendars"))
+
+
+def topic_for(kind: str, made: int) -> str:
+    """The subject of a kind's next AI item. Each kind starts at a different place, so one day's cards differ."""
+    if kind == "rule":
+        return RULE_TOPICS[made % len(RULE_TOPICS)]
+    return TOPICS[(made + KINDS.index(kind) * 13) % len(TOPICS)]
+
+
 # A card may explain what buying and selling are. It may never tell the reader to do either, or say where price is going.
 _FORBIDDEN = re.compile(
     r"\b(buy now|sell now|you should (buy|sell)|time to (buy|sell)|must (buy|sell)|go (long|short) now"
@@ -239,7 +255,7 @@ def next_item(db: EventRepository, kind: str, library: dict, settings: Settings,
     position, recent, made = _state(db, kind)
     seen = {_norm(r) for r in recent}
     if getattr(settings, "gemini_api_key", None):
-        topic = TOPICS[made % len(TOPICS)]
+        topic = topic_for(kind, made)
         try:
             raw = ask_any_model(build_prompt(kind, topic, recent), settings, ask=ask)
             item = validate(kind, raw)
@@ -318,5 +334,5 @@ def send_content_card(db: EventRepository, client: TelegramClient | None, settin
 
 __all__ = [
     "ContentError", "KINDS", "TOPICS", "arrange_quiz", "ask_gemini", "build_prompt", "build_text", "headline",
-    "load_library", "next_item", "save_state", "send_content_card", "validate",
+    "load_library", "next_item", "save_state", "send_content_card", "topic_for", "validate",
 ]

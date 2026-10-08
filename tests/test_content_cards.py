@@ -253,7 +253,7 @@ def test_with_a_key_the_ai_writes_the_card_and_the_bookmark_stays(db):
     assert GOOD["fact"]["text"] in client.texts[0]
     prompt, key, options = ask.calls[0]
     assert key == KEY and options["model"] == "test-model" and KEY not in prompt
-    assert "ONE new fact" in prompt and cc.TOPICS[0] in prompt and "Never tell the reader to buy or sell" in prompt
+    assert "ONE new fact" in prompt and cc.topic_for("fact", 0) in prompt and "Never tell the reader to buy or sell" in prompt
     assert db.get_content_state("fact")["position"] == 0                # the library is untouched, kept as backup
 
 
@@ -274,7 +274,7 @@ def test_the_ai_is_told_what_was_used_lately_and_a_repeat_is_refused(db):
     ask = writer(GOOD["fact"])                                          # the AI repeats itself
     post(db, client, config, slot(cards.CORNER, "fact", hour=22), ask=ask)
     assert GOOD["fact"]["text"][:60] in ask.calls[0][0] and "used recently" in ask.calls[0][0]
-    assert cc.TOPICS[1] in ask.calls[0][0]                              # and it is moved on to the next subject
+    assert cc.topic_for("fact", 1) in ask.calls[0][0]                   # and it is moved on to the next subject
     assert LIBRARY["fact"][0]["text"] in client.texts[1]                # the repeat was not posted
 
 
@@ -284,7 +284,12 @@ def test_topics_rotate_so_the_writer_covers_the_whole_field(db):
         ask = writer({"text": f"Fact number {i}: gold has been valued by people for a very long time indeed."})
         post(db, client, config, cards.Slot(cards.CORNER, ist(THURSDAY, 14) + timedelta(days=i), "fact"), ask=ask)
         seen.append(next(t for t in cc.TOPICS if f"subject: {t}." in ask.calls[0][0]))
-    assert seen == list(cc.TOPICS[:5]) and len(cc.TOPICS) >= 60 and len(set(cc.TOPICS)) == len(cc.TOPICS)
+    assert seen == [cc.topic_for("fact", i) for i in range(5)] and len(set(seen)) == 5
+    assert len(cc.TOPICS) >= 60 and len(set(cc.TOPICS)) == len(cc.TOPICS)
+    # On any one day the five kinds are about different subjects, and a rule is always about conduct.
+    assert len({cc.topic_for(kind, 0) for kind in cc.KINDS}) == 5
+    assert len(cc.RULE_TOPICS) == 20 and {cc.topic_for("rule", i) for i in range(40)} == set(cc.RULE_TOPICS)
+    assert {cc.topic_for("lesson", i) for i in range(len(cc.TOPICS))} == set(cc.TOPICS)
 
 
 def test_models_are_tried_in_order_until_one_answers(db):
