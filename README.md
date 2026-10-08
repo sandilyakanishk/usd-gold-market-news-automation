@@ -960,6 +960,39 @@ Each posted price is kept in the `price_snapshots` table (`symbol`, `slot`,
 the next post's change line compares with. The table is created by
 `python -m src.main --init-db`.
 
+## Video forwarding (Telegram only)
+
+When a new YouTube Short appears on the owner's channel, it is posted to the
+Telegram channel: the cover image, the title and description exactly as
+written on YouTube, and the link.
+
+```bash
+python -m src.main --telegram-send-videos --dry-run   # show what would be posted
+python -m src.main --telegram-send-videos             # post new videos
+```
+
+- **Source.** The channel's public feed
+  (`youtube.com/feeds/videos.xml?channel_id=...`). No key, no login, no
+  scraping, and no video file is downloaded. The feed lists the latest 15
+  uploads and can lag a few minutes behind YouTube.
+- **Settings.** `YOUTUBE_CHANNEL_ID` (the id starting with `UC`; empty
+  switches the feature off), `YOUTUBE_FORWARD` (`shorts`, the default, or
+  `all` to include long videos and live streams) and `VIDEO_POSTS_SINCE`
+  (uploads published earlier are never forwarded).
+- **Once per video.** The video id is the message identity
+  (`VIDEO_YT_<id>`), recorded in `message_deliveries`.
+- **Cover image.** A Short's upright cover is tried first, then the feed's
+  thumbnail. If Telegram accepts neither, the caption is sent as a normal
+  message with link preview on.
+- **At most three posts per run**; any further new videos follow on the next
+  runs.
+- **In the cloud** the step runs only when the repository variable
+  `YOUTUBE_CHANNEL_ID` is set, and it may fail without failing the run.
+
+Not built yet: Instagram. The plan is one post per reel carrying both links,
+waiting up to 30 minutes for the matching reel on the other platform and
+posting with the one link if it does not appear.
+
 ## Cloud runner (Step 6)
 
 The project runs on GitHub Actions, so it does not need your computer. There

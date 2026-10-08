@@ -33,7 +33,7 @@ from .delivery.service import (
     send_telegram_test_message, send_test_message, telegram_chat_id,
 )
 from .delivery.telegram import describe_chat
-from . import pulse
+from . import pulse, social
 from .delivery.whapi import mask_chat_id
 from .filters.gold_usd_filters import USD
 from .pipeline import cleanup_old_events, sync
@@ -121,6 +121,8 @@ def build_parser() -> argparse.ArgumentParser:
     tg.add_argument("--telegram-send-alert", action="store_true", help="send high-impact alerts")
     tg.add_argument("--telegram-send-actuals", action="store_true", help="send result messages for released events")
     tg.add_argument("--telegram-send-upcoming", action="store_true", help="send reminders for upcoming high-priority events")
+    tg.add_argument("--telegram-send-videos", action="store_true",
+                    help="forward new YouTube Shorts from YOUTUBE_CHANNEL_ID (cover image, caption and link)")
     tg.add_argument("--telegram-send-pulse", action="store_true",
                     help="send the half-hourly market pulse (gold price and next high-impact USD event)")
 
@@ -532,6 +534,40 @@ def run_telegram_pulse(args: argparse.Namespace, settings: Settings, today: date
     return 0
 
 
+def run_telegram_videos(args: argparse.Namespace, settings: Settings, today: date) -> int:
+    """Forward the channel's new YouTube Shorts. Telegram only."""
+    if not settings.youtube_channel_id:
+        print("YOUTUBE_CHANNEL_ID is not set. No video was forwarded.")
+        return 0
+    chat_id = telegram_chat_id(settings)
+    client = None if args.dry_run else build_telegram_client(settings)
+    with open_database(settings) as db:
+        try:
+            results = social.send_new_videos(db, client, settings, chat_id, dry_run=args.dry_run)
+        except social.VideoFeedError as exc:
+            logging.getLogger(__name__).warning("Video forwarding: %s", exc)
+            print(f"VIDEO FEED ERROR: {exc} It is retried on the next run.", file=sys.stderr)
+            return 1
+    if args.dry_run:
+        print("DRY RUN: nothing is sent and nothing is recorded.\n")
+    if not results:
+        print("No new video.")
+        return 0
+    failed = False
+    for video, result, caption in results:
+        print(f"===== {video.message_key} | {social.MESSAGE_TYPE} =====")
+        if result.outcome == OUTCOME_ALREADY_SENT:
+            print(f"Already sent — skipped. (sent {result.sent_at}, Telegram message ID {result.provider_message_id})\n")
+        elif result.outcome == OUTCOME_DRY_RUN:
+            print(f"Would send (with the cover image):\n{caption}\n")
+        elif result.outcome == OUTCOME_SENT:
+            print(f"Sent. Telegram message ID: {result.provider_message_id}\n")
+        else:
+            failed = True
+            print(f"FAILED: {result.error}\n")
+    return 1 if failed else 0
+
+
 def run_preview(args: argparse.Namespace, settings: Settings, today: date) -> int:
     """Generate message text. Read-only: no sync, no classification run, no enrichment, no delivery."""
     kinds = dict(morning=args.preview_morning, alert=args.preview_alert, actuals=args.preview_actuals,
@@ -675,7 +711,7 @@ def main(argv: list[str] | None = None) -> int:
         print("--dry-run and --recheck-released only apply together with --enrich-actuals.", file=sys.stderr)
         return 2
     sending = wants_whatsapp_send(args) or wants_telegram_send(args)
-    if args.dry_run and not (args.enrich_actuals or sending or args.telegram_send_pulse):
+    if args.dry_run and not (args.enrich_actuals or sending or args.telegram_send_pulse or args.telegram_send_videos):
         print("--dry-run and --recheck-released only apply together with --enrich-actuals "
               "(--dry-run also with a --whatsapp-send-... or --telegram-send-... option).", file=sys.stderr)
         return 2
@@ -698,6 +734,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_telegram_check(settings)
         if args.telegram_test:
             return run_telegram_test(settings)
+        if args.telegram_send_videos:
+            return _guarded(run_telegram_videos, "TELEGRAM", args, settings, today)
         if args.telegram_send_pulse:
             return _guarded(run_telegram_pulse, "TELEGRAM", args, settings, today)
         if sending:

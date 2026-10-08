@@ -209,7 +209,7 @@ def test_it_refreshes_and_enriches_before_any_send():
         "Send today's high-impact alerts", "Send newly released results", "Send tomorrow's reminders",
         "Telegram: check the bot and the channel (sends nothing)", "Telegram: send the morning update",
         "Telegram: send today's high-impact alerts", "Telegram: send newly released results",
-        "Telegram: send tomorrow's reminders", "Telegram: send the market pulse",
+        "Telegram: send tomorrow's reminders", "Telegram: forward new videos", "Telegram: send the market pulse",
         "Fail the run if a source reported a problem"]
     collect = all_steps["Refresh the calendar and look up released figures"]
     assert commands(collect) == ["python -m src.main --enrich-actuals --week > collect.out 2> collect.err"]
@@ -262,7 +262,9 @@ def test_it_fails_loudly_and_never_retries():
     for forbidden in ("retry", "while ", "until ", "sleep", "|| true"):
         assert forbidden not in text, forbidden
     # The one tolerated failure is the half-hourly market pulse, an extra that the next run repeats.
-    assert text.count("continue-on-error") == 1 and "continue-on-error" in all_steps["Telegram: send the market pulse"]
+    assert text.count("continue-on-error") == 2
+    for extra in ("Telegram: send the market pulse", "Telegram: forward new videos"):
+        assert "continue-on-error" in all_steps[extra]
     assert "timeout-minutes: 10" in text and "contents: read" in text and "DATABASE_BACKEND: postgres" in text
 
 
@@ -301,7 +303,7 @@ def test_workflow_file_is_plain_spaces_with_unix_line_endings():
 def test_telegram_sends_mirror_the_whatsapp_ones():
     all_steps = steps()
     sends = {name: commands(text)[-1] for name, text in all_steps.items()
-             if "--telegram-send-" in text and "--telegram-send-pulse" not in text}
+             if "--telegram-send-" in text and "--telegram-send-pulse" not in text and "--telegram-send-videos" not in text}
     assert sends == {
         "Telegram: send the morning update": "python -m src.main --telegram-send-morning",
         "Telegram: send today's high-impact alerts": "python -m src.main --telegram-send-alert --today",
@@ -317,7 +319,7 @@ def test_telegram_sends_mirror_the_whatsapp_ones():
 def test_telegram_is_off_unless_the_repository_variable_enables_it():
     all_steps = steps()
     telegram_steps = {n: t for n, t in all_steps.items() if n.startswith("Telegram:")}
-    assert len(telegram_steps) == 6
+    assert len(telegram_steps) == 7
     for name, text in telegram_steps.items():
         assert "vars.TELEGRAM_ENABLED == 'true'" in text, name
     check = telegram_steps["Telegram: check the bot and the channel (sends nothing)"]
@@ -402,8 +404,9 @@ def test_the_market_pulse_goes_to_telegram_only_on_every_run():
     # A price-source hiccup must not turn the whole run red; the next run retries.
     assert "continue-on-error: true" in step
     # WhatsApp never receives it: 48 posts a day would exhaust the Whapi allowance.
-    assert "WHAPI_TOKEN" not in step and "pulse" not in "\n".join(t for n, t in all_steps.items() if not n.startswith("Telegram:"))
-    assert [n for n, t in all_steps.items() if "continue-on-error" in t] == ["Telegram: send the market pulse"]
+    assert "WHAPI_TOKEN" not in step and "send-pulse" not in "\n".join(t for n, t in all_steps.items() if not n.startswith("Telegram:"))
+    assert [n for n, t in all_steps.items() if "continue-on-error" in t] == [
+        "Telegram: forward new videos", "Telegram: send the market pulse"]
 
 
 # -- WhatsApp is opt-in --------------------------------------------------------------------
@@ -421,3 +424,15 @@ def test_whatsapp_is_off_unless_the_repository_variable_enables_it():
     for name, text in all_steps.items():
         if name.startswith("Telegram:"):
             assert "WHATSAPP_ENABLED" not in text and "steps.destination" not in text, name
+
+
+# -- video forwarding ----------------------------------------------------------------------
+
+def test_video_forwarding_runs_only_when_a_channel_is_configured():
+    step = steps()["Telegram: forward new videos"]
+    assert commands(step) == ["python -m src.main --telegram-send-videos"]
+    assert "vars.YOUTUBE_CHANNEL_ID != ''" in step and "vars.TELEGRAM_ENABLED == 'true'" in step
+    assert "YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}" in step
+    assert "continue-on-error: true" in step and "WHAPI_TOKEN" not in step and "steps.plan.outputs" not in step
+    # The channel id is configuration, not source: it is never written into the workflow file.
+    assert not re.search(r"UC[A-Za-z0-9_-]{22}", workflow_text(PRODUCTION))

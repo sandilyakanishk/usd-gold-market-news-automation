@@ -39,6 +39,15 @@ def _retention_days(value: str) -> int:
 
 
 DEFAULT_GOLD_PRICE_URL = "https://api.gold-api.com/price/XAU"
+# The day video forwarding was switched on.
+DEFAULT_VIDEO_POSTS_SINCE = "2026-10-08T00:00:00Z"
+
+
+def _youtube_forward(value: str) -> str:
+    value = value.strip().lower()
+    if value not in ("shorts", "all"):
+        raise ValueError("YOUTUBE_FORWARD must be shorts or all.")
+    return value
 
 
 @dataclass(frozen=True)
@@ -72,6 +81,9 @@ class Settings:
     telegram_bot_token: str | None = None  # secret, never logged
     telegram_chat_id: str | None = None  # "@channelname" or a numeric id
     gold_price_url: str = DEFAULT_GOLD_PRICE_URL  # free XAU/USD quote for the market pulse; no key
+    youtube_channel_id: str | None = None  # the owner's channel (UC...); its new Shorts are forwarded to Telegram
+    youtube_forward: str = "shorts"  # "shorts" or "all" (also long videos and live streams)
+    video_posts_since: str = DEFAULT_VIDEO_POSTS_SINCE  # older uploads are never forwarded
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -108,4 +120,7 @@ class Settings:
             telegram_bot_token=env("TELEGRAM_BOT_TOKEN") or None,
             telegram_chat_id=env("TELEGRAM_CHAT_ID") or None,
             gold_price_url=env("GOLD_PRICE_URL") or DEFAULT_GOLD_PRICE_URL,
+            youtube_channel_id=(env("YOUTUBE_CHANNEL_ID") or "").strip() or None,
+            youtube_forward=_youtube_forward(env("YOUTUBE_FORWARD") or "shorts"),
+            video_posts_since=env("VIDEO_POSTS_SINCE") or DEFAULT_VIDEO_POSTS_SINCE,
         )

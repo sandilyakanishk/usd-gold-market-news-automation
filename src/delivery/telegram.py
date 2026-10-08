@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://api.telegram.org"
 USER_AGENT = "usd-gold-calendar-collector/0.1 (personal, low-frequency)"
 MAX_TEXT_LENGTH = 4096
+MAX_CAPTION_LENGTH = 1024
 # Telegram's simple Markdown reads *bold* and _italic_ the same way WhatsApp does.
 PARSE_MODE = "Markdown"
 
@@ -134,7 +135,7 @@ class TelegramClient:
                 "Make it an administrator with permission to post messages.")
         return {"bot": me.get("username"), "title": chat.get("title"), "type": chat.get("type"), "status": status}
 
-    def send_text(self, chat_id: str, text: str, *, markdown: bool = True) -> str:
+    def send_text(self, chat_id: str, text: str, *, markdown: bool = True, link_preview: bool = False) -> str:
         """Send `text` exactly as given. Returns Telegram's message id.
 
         `markdown` only tells Telegram whether to render *bold* and _italic_;
@@ -147,7 +148,7 @@ class TelegramClient:
             raise TelegramMessageError("The message has no text.")
         if len(text) > MAX_TEXT_LENGTH:
             raise TelegramMessageError(f"The message is {len(text)} characters long; the limit is {MAX_TEXT_LENGTH}.")
-        payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
+        payload = {"chat_id": chat_id, "text": text, "disable_web_page_preview": not link_preview}
         try:
             result = self._call("sendMessage", {**payload, "parse_mode": PARSE_MODE} if markdown else payload)
         except TelegramMessageError as exc:
@@ -160,4 +161,24 @@ class TelegramClient:
         if message_id is None:
             raise TelegramError("Telegram did not confirm the message: no message id was returned.")
         log.info("Telegram: message accepted for %s (id %s)", describe_chat(chat_id), message_id)
+        return str(message_id)
+
+    def send_photo(self, chat_id: str, photo_url: str, caption: str) -> str:
+        """Post the image at `photo_url` with `caption` under it, as plain text. Returns Telegram's message id.
+
+        Telegram fetches the image itself; nothing is downloaded here.
+        """
+        if not chat_id or not str(chat_id).strip():
+            raise TelegramConfigError("TELEGRAM_CHAT_ID is not set. Add it to the environment or to .env.")
+        if not isinstance(photo_url, str) or not photo_url.startswith("https://"):
+            raise TelegramMessageError("The image address must start with https://.")
+        if not isinstance(caption, str) or not caption.strip():
+            raise TelegramMessageError("The message has no text.")
+        if len(caption) > MAX_CAPTION_LENGTH:
+            raise TelegramMessageError(f"The caption is {len(caption)} characters long; the limit is {MAX_CAPTION_LENGTH}.")
+        result = self._call("sendPhoto", {"chat_id": chat_id, "photo": photo_url, "caption": caption})
+        message_id = result.get("message_id") if isinstance(result, dict) else None
+        if message_id is None:
+            raise TelegramError("Telegram did not confirm the message: no message id was returned.")
+        log.info("Telegram: photo accepted for %s (id %s)", describe_chat(chat_id), message_id)
         return str(message_id)
