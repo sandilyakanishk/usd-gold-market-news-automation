@@ -9,6 +9,12 @@ DELIVERY_STATUSES = (SENT, FAILED)
 
 PROVIDER_WHAPI = "whapi"
 DESTINATION_WHATSAPP_ANNOUNCEMENT = "whatsapp_community_announcement"
+PROVIDER_TELEGRAM = "telegram"
+DESTINATION_TELEGRAM_CHANNEL = "telegram_channel"
+
+
+class DeliveryError(Exception):
+    """A provider could not accept a message. Messages never contain credentials."""
 
 # Outcomes of one delivery attempt (not all of them are stored).
 OUTCOME_SENT = "SENT"

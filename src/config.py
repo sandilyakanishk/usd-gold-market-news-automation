@@ -66,6 +66,8 @@ class Settings:
     whapi_base_url: str = "https://gate.whapi.cloud"
     whatsapp_community_id: str | None = None
     whatsapp_announcement_chat_id: str | None = None
+    telegram_bot_token: str | None = None  # secret, never logged
+    telegram_chat_id: str | None = None  # "@channelname" or a numeric id
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -99,4 +101,6 @@ class Settings:
             whapi_base_url=env("WHAPI_BASE_URL") or "https://gate.whapi.cloud",
             whatsapp_community_id=env("WHATSAPP_COMMUNITY_ID") or None,
             whatsapp_announcement_chat_id=env("WHATSAPP_ANNOUNCEMENT_CHAT_ID") or None,
+            telegram_bot_token=env("TELEGRAM_BOT_TOKEN") or None,
+            telegram_chat_id=env("TELEGRAM_CHAT_ID") or None,
         )

@@ -1,5 +1,6 @@
 # Production automation: collects the calendar, looks up released figures and
-# SENDS REAL WHATSAPP MESSAGES to the Community's Announcements group.
+# SENDS REAL WHATSAPP MESSAGES to the Community's Announcements group, and
+# the same messages to the Telegram channel when TELEGRAM_ENABLED is true.
 #
 # GitHub cron is in UTC. India time (Asia/Kolkata) is UTC+5:30 all year.
 #
@@ -89,6 +90,8 @@ jobs:
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
           WHATSAPP_COMMUNITY_ID: ${{ secrets.WHATSAPP_COMMUNITY_ID }}
           WHATSAPP_ANNOUNCEMENT_CHAT_ID: ${{ secrets.WHATSAPP_ANNOUNCEMENT_CHAT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python -m src.preflight --production
 
       # Confirms the WhatsApp session and that the destination is still the
@@ -157,6 +160,54 @@ jobs:
           WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
           WHATSAPP_ANNOUNCEMENT_CHAT_ID: ${{ secrets.WHATSAPP_ANNOUNCEMENT_CHAT_ID }}
         run: python -m src.main --whatsapp-send-upcoming --tomorrow
+
+      # ---- Telegram ----------------------------------------------------------
+      # The same messages, unchanged, to the Telegram channel. Switched on by
+      # the repository variable TELEGRAM_ENABLED=true; while it is unset these
+      # steps are skipped. Telegram keeps its own delivery record, so it is
+      # independent of WhatsApp: a problem on one side never blocks the other.
+      - name: "Telegram: check the bot and the channel (sends nothing)"
+        id: telegram
+        if: ${{ !cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.collect.outcome == 'success' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m src.main --telegram-check
+
+      - name: "Telegram: send the morning update"
+        if: ${{ !cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.collect.outcome == 'success' && steps.telegram.outcome == 'success' && steps.plan.outputs.morning == 'true' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m src.main --telegram-send-morning
+
+      - name: "Telegram: send today's high-impact alerts"
+        if: ${{ !cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.collect.outcome == 'success' && steps.telegram.outcome == 'success' && steps.plan.outputs.morning == 'true' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m src.main --telegram-send-alert --today
+
+      - name: "Telegram: send newly released results"
+        if: ${{ !cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.collect.outcome == 'success' && steps.telegram.outcome == 'success' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          since="$(python -c "from datetime import datetime, timedelta; from zoneinfo import ZoneInfo; print((datetime.now(ZoneInfo('Asia/Kolkata')) - timedelta(days=1)).date().isoformat())")"
+          python -m src.main --telegram-send-actuals --from "$since"
+
+      - name: "Telegram: send tomorrow's reminders"
+        if: ${{ !cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' && steps.collect.outcome == 'success' && steps.telegram.outcome == 'success' && steps.plan.outputs.evening == 'true' }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m src.main --telegram-send-upcoming --tomorrow
 
       # The application keeps working from stored data when a source is
       # unavailable. This step makes sure such a run is still reported as

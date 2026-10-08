@@ -12,6 +12,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from .models import DeliveryError
+
 log = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://gate.whapi.cloud"
@@ -21,7 +23,7 @@ WHAPI_USER_AGENT = "usd-gold-calendar-collector/0.1 (personal, low-frequency)"
 MAX_TEXT_LENGTH = 4096
 
 
-class WhapiError(Exception):
+class WhapiError(DeliveryError):
     """A Whapi request failed. Messages never contain the token."""
 
 

@@ -855,6 +855,63 @@ client, so the adapter always sends this project's own `User-Agent`.
 - Whapi's free sandbox has message and time limits; check your plan before
   relying on it daily.
 
+## Telegram delivery
+
+The same four message types can also be posted to a Telegram channel through
+a bot. The text is identical to what WhatsApp receives; `*bold*` and
+`_italic_` render the same way. Telegram keeps its own delivery record
+(provider `telegram`), so the two channels are independent: a message sent to
+one is still sent to the other, and a failure on one never blocks the other.
+
+### Setup
+
+1. In Telegram, message **@BotFather**, send `/newbot` and follow the prompts.
+   It gives you a bot token.
+2. Create a channel and add the bot as an administrator with permission to
+   post messages.
+3. Add to `.env`:
+
+   ```
+   TELEGRAM_BOT_TOKEN=the-token-from-botfather
+   TELEGRAM_CHAT_ID=@yourchannel
+   ```
+
+4. Check it, which sends nothing:
+
+   ```bash
+   python -m src.main --telegram-check
+   ```
+
+### Commands
+
+| Option | Does |
+| --- | --- |
+| `--telegram-check` | checks the token and that the bot may post to the channel; sends nothing |
+| `--telegram-test` | sends one fixed test message |
+| `--telegram-send-morning`, `--telegram-send-alert`, `--telegram-send-actuals`, `--telegram-send-upcoming` | send that message type |
+| `--dry-run` | with a send option: shows what would be sent; sends and records nothing |
+
+A WhatsApp and a Telegram option can be given together, for example
+`--whatsapp-send-morning --telegram-send-morning`.
+
+### In the cloud
+
+Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` as repository secrets. The
+production workflow posts to Telegram only when the repository **variable**
+`TELEGRAM_ENABLED` is `true`:
+
+```bash
+gh variable set TELEGRAM_ENABLED --body true
+```
+
+Set it to `false` (or delete it) to stop Telegram posts without touching
+WhatsApp. When enabled, each run checks the bot and channel, then sends the
+same messages on the same timetable as WhatsApp. The Bot API is free and has
+no monthly request cap.
+
+If a value in a message would break Telegram's formatting, the same text is
+sent as plain text instead.
+
 ## Cloud runner (Step 6)
 
 The project runs on GitHub Actions, so it does not need your computer. There

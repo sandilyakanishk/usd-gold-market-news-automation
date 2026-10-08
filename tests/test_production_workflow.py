@@ -14,6 +14,10 @@ from src.runplan import RunPlan, plan
 
 from .test_cloud_runner import SAFE_TEST, SECRET_NAMES, WORKFLOWS, code_lines, workflow_text
 
+PRODUCTION_SECRETS = SECRET_NAMES | {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"}
+TELEGRAM_GUARD = ("!cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' "
+                  "&& steps.collect.outcome == 'success' && steps.telegram.outcome == 'success'")
+
 PRODUCTION = WORKFLOWS / "production.yml"
 IST = ZoneInfo("Asia/Kolkata")
 IST_OFFSET_MINUTES = 5 * 60 + 30
@@ -25,7 +29,7 @@ def steps():
     """{step name: step text} for the production workflow, comments removed."""
     text = "\n".join(code_lines(workflow_text(PRODUCTION)))
     parts = re.split(r"\n      - name: ", text)[1:]
-    return {part.split("\n", 1)[0]: part for part in parts}
+    return {part.split("\n", 1)[0].strip('"'): part for part in parts}
 
 
 def commands(step_text):
@@ -226,7 +230,9 @@ def test_it_refreshes_and_enriches_before_any_send():
         "Preflight (reports PRESENT or MISSING, never a value)", "WhatsApp destination check (sends nothing)",
         "Refresh the calendar and look up released figures", "Send the morning update",
         "Send today's high-impact alerts", "Send newly released results", "Send tomorrow's reminders",
-        "Fail the run if a source reported a problem"]
+        "Telegram: check the bot and the channel (sends nothing)", "Telegram: send the morning update",
+        "Telegram: send today's high-impact alerts", "Telegram: send newly released results",
+        "Telegram: send tomorrow's reminders", "Fail the run if a source reported a problem"]
     collect = all_steps["Refresh the calendar and look up released figures"]
     assert commands(collect) == ["python -m src.main --enrich-actuals --week > collect.out 2> collect.err"]
     assert "--dry-run" not in collect and "--no-fetch" not in collect
@@ -292,10 +298,10 @@ def test_the_failure_markers_match_what_the_application_prints():
 
 def test_secrets_are_only_referenced_never_written():
     text = workflow_text(PRODUCTION)
-    assert set(re.findall(r"\$\{\{\s*secrets\.([A-Z_]+)\s*\}\}", text)) == SECRET_NAMES
+    assert set(re.findall(r"\$\{\{\s*secrets\.([A-Z_]+)\s*\}\}", text)) == PRODUCTION_SECRETS
     for line in code_lines(text):
         match = re.fullmatch(r"\s+([A-Z_]+):\s*(.+)", line)
-        if match and match.group(1) in SECRET_NAMES:
+        if match and match.group(1) in PRODUCTION_SECRETS:
             assert match.group(2) == "${{ secrets.%s }}" % match.group(1), line
     assert "postgresql://" not in text and "@g.us" not in text
     assert not re.search(r"(printenv|env \||set -x|cat \.env)", "\n".join(code_lines(text)))
@@ -317,3 +323,50 @@ def test_a_day_of_scheduled_runs_stays_inside_the_free_allowances():
     checks = sum(plan(datetime(2026, 10, 8, t // 60, t % 60, tzinfo=IST)).check for t in times)
     assert checks * 2 * 31 <= 150            # the destination check makes two API requests
     assert timedelta(minutes=30) == timedelta(minutes=30)
+
+
+# -- Telegram steps ------------------------------------------------------------------------
+
+def test_telegram_sends_mirror_the_whatsapp_ones():
+    all_steps = steps()
+    sends = {name: commands(text)[-1] for name, text in all_steps.items() if "--telegram-send-" in text}
+    assert sends == {
+        "Telegram: send the morning update": "python -m src.main --telegram-send-morning",
+        "Telegram: send today's high-impact alerts": "python -m src.main --telegram-send-alert --today",
+        "Telegram: send newly released results": 'python -m src.main --telegram-send-actuals --from "$since"',
+        "Telegram: send tomorrow's reminders": "python -m src.main --telegram-send-upcoming --tomorrow",
+    }
+    # Same commands as WhatsApp apart from the channel name, so both receive the same messages.
+    whatsapp = {name: commands(text)[-1] for name, text in all_steps.items() if "--whatsapp-send-" in text}
+    assert sorted(c.replace("--telegram-", "--whatsapp-") for c in sends.values()) == sorted(whatsapp.values())
+    assert "--telegram-test" not in "\n".join(all_steps.values())
+
+
+def test_telegram_is_off_unless_the_repository_variable_enables_it():
+    all_steps = steps()
+    telegram_steps = {n: t for n, t in all_steps.items() if n.startswith("Telegram:")}
+    assert len(telegram_steps) == 5
+    for name, text in telegram_steps.items():
+        assert "vars.TELEGRAM_ENABLED == 'true'" in text, name
+    check = telegram_steps["Telegram: check the bot and the channel (sends nothing)"]
+    assert "id: telegram" in check and commands(check) == ["python -m src.main --telegram-check"]
+    expected = {
+        "Telegram: send the morning update": " && steps.plan.outputs.morning == 'true'",
+        "Telegram: send today's high-impact alerts": " && steps.plan.outputs.morning == 'true'",
+        "Telegram: send newly released results": "",
+        "Telegram: send tomorrow's reminders": " && steps.plan.outputs.evening == 'true'",
+    }
+    for name, extra in expected.items():
+        assert "if: ${{ " + TELEGRAM_GUARD + extra + " }}" in telegram_steps[name], name
+
+
+def test_the_two_channels_are_independent_in_the_workflow():
+    all_steps = steps()
+    for name, text in all_steps.items():
+        if name.startswith("Telegram:"):
+            assert "WHAPI_TOKEN" not in text and "steps.destination" not in text, name
+            assert "TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}" in text
+        if name.startswith("Send "):
+            assert "TELEGRAM" not in text and "steps.telegram" not in text, name
+    # A failed WhatsApp send does not skip Telegram: its steps use !cancelled(), not success().
+    assert all("!cancelled()" in t for n, t in all_steps.items() if n.startswith("Telegram:"))

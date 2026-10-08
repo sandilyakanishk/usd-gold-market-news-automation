@@ -27,8 +27,13 @@ from .config import Settings
 from .database.base import DatabaseError
 from .database.factory import open_database
 from .delivery.models import OUTCOME_ALREADY_SENT, OUTCOME_DRY_RUN, OUTCOME_FAILED, OUTCOME_SENT
-from .delivery.service import announcement_chat_id, build_whapi_client, deliver_message, send_test_message
-from .delivery.whapi import WhapiError, mask_chat_id
+from .delivery.models import DeliveryError
+from .delivery.service import (
+    announcement_chat_id, build_telegram_client, build_whapi_client, deliver_message, deliver_telegram_message,
+    send_telegram_test_message, send_test_message, telegram_chat_id,
+)
+from .delivery.telegram import describe_chat
+from .delivery.whapi import mask_chat_id
 from .filters.gold_usd_filters import USD
 from .pipeline import cleanup_old_events, sync
 
@@ -105,6 +110,16 @@ def build_parser() -> argparse.ArgumentParser:
     wa.add_argument("--whatsapp-send-alert", action="store_true", help="send high-impact alerts")
     wa.add_argument("--whatsapp-send-actuals", action="store_true", help="send result messages for released events")
     wa.add_argument("--whatsapp-send-upcoming", action="store_true", help="send reminders for upcoming high-priority events")
+
+    tg = p.add_argument_group(
+        "Telegram delivery (sends the same messages, unchanged, to a Telegram channel)",
+        "Independent of WhatsApp: each keeps its own record of what was sent. --dry-run works here too.")
+    tg.add_argument("--telegram-check", action="store_true", help="check the bot token and that it may post to the channel; sends nothing")
+    tg.add_argument("--telegram-test", action="store_true", help="send one fixed test message")
+    tg.add_argument("--telegram-send-morning", action="store_true", help="send the daily update for today (or --tomorrow / --date)")
+    tg.add_argument("--telegram-send-alert", action="store_true", help="send high-impact alerts")
+    tg.add_argument("--telegram-send-actuals", action="store_true", help="send result messages for released events")
+    tg.add_argument("--telegram-send-upcoming", action="store_true", help="send reminders for upcoming high-priority events")
 
     p.add_argument("--json", action="store_true", help="print JSON instead of text")
     p.add_argument("--no-fetch", action="store_true", help="read the database only, no network")
@@ -400,16 +415,14 @@ def run_whatsapp_test(settings: Settings) -> int:
     return 0
 
 
-def run_whatsapp_send(args: argparse.Namespace, settings: Settings, today: date) -> int:
-    """Deliver the content engine's messages. The text is passed on unchanged; duplicates are skipped."""
-    chat_id = announcement_chat_id(settings)
-    client = None if args.dry_run else build_whapi_client(settings)
+def _send_messages(args: argparse.Namespace, settings: Settings, today: date, *, kinds: dict, chat_id: str,
+                   make_client, deliver, destination_text: str, id_label: str) -> int:
+    """Deliver the content engine's messages to one destination. Text is passed on unchanged; duplicates are skipped."""
+    client = None if args.dry_run else make_client(settings)
     failed = False
     with open_database(settings) as db:
         try:
-            groups = build_messages(args, settings, today, db, morning=args.whatsapp_send_morning,
-                                    alert=args.whatsapp_send_alert, actuals=args.whatsapp_send_actuals,
-                                    upcoming=args.whatsapp_send_upcoming)
+            groups = build_messages(args, settings, today, db, **kinds)
         except InvalidDateError as exc:
             print(f"Invalid date: {exc}", file=sys.stderr)
             return 2
@@ -422,19 +435,67 @@ def run_whatsapp_send(args: argparse.Namespace, settings: Settings, today: date)
                 print(f"No eligible {message_type} message.\n")
                 continue
             for message in eligible:
-                result = deliver_message(db, client, message, chat_id, dry_run=args.dry_run)
+                result = deliver(db, client, message, chat_id, dry_run=args.dry_run)
                 print(f"===== {message.message_key} | {message.message_type} =====")
-                print(f"Destination: whatsapp_community_announcement ({mask_chat_id(chat_id)}) via whapi")
+                print(f"Destination: {destination_text}")
                 if result.outcome == OUTCOME_ALREADY_SENT:
-                    print(f"Already sent — skipped. (sent {result.sent_at}, Whapi message ID {result.provider_message_id})\n")
+                    print(f"Already sent — skipped. (sent {result.sent_at}, {id_label} {result.provider_message_id})\n")
                 elif result.outcome == OUTCOME_DRY_RUN:
                     print(f"Would send:\n{message.text}\n")
                 elif result.outcome == OUTCOME_SENT:
-                    print(f"Sent. Whapi message ID: {result.provider_message_id}\n")
+                    print(f"Sent. {id_label}: {result.provider_message_id}\n")
                 else:
                     failed = True
                     print(f"FAILED: {result.error}\n")
     return 1 if failed else 0
+
+
+def run_whatsapp_send(args: argparse.Namespace, settings: Settings, today: date) -> int:
+    chat_id = announcement_chat_id(settings)
+    return _send_messages(
+        args, settings, today, chat_id=chat_id, make_client=build_whapi_client, deliver=deliver_message,
+        kinds=dict(morning=args.whatsapp_send_morning, alert=args.whatsapp_send_alert,
+                   actuals=args.whatsapp_send_actuals, upcoming=args.whatsapp_send_upcoming),
+        destination_text=f"whatsapp_community_announcement ({mask_chat_id(chat_id)}) via whapi", id_label="Whapi message ID")
+
+
+def wants_telegram_send(args: argparse.Namespace) -> bool:
+    return bool(args.telegram_send_morning or args.telegram_send_alert or args.telegram_send_actuals
+                or args.telegram_send_upcoming)
+
+
+def run_telegram_check(settings: Settings) -> int:
+    """Verify the bot token and that the bot may post to the configured channel. Sends nothing."""
+    client = build_telegram_client(settings)
+    chat_id = telegram_chat_id(settings)
+    info = client.check_destination(chat_id)
+    print(f"Telegram bot: OK (@{info['bot']})")
+    print(f"Channel: {describe_chat(chat_id)} ({info['type']}), bot is {info['status']} and may post")
+    print("Nothing was sent.")
+    return 0
+
+
+def run_telegram_test(settings: Settings) -> int:
+    client = build_telegram_client(settings)
+    chat_id = telegram_chat_id(settings)
+    with open_database(settings) as db:
+        result = send_telegram_test_message(db, client, chat_id)
+    if result.outcome != OUTCOME_SENT:
+        print(f"TELEGRAM ERROR: test message not sent: {result.error}", file=sys.stderr)
+        return 1
+    print(f"Test message sent to {describe_chat(chat_id)}.")
+    print(f"message_key: {result.message_key}")
+    print(f"Telegram message ID: {result.provider_message_id}")
+    return 0
+
+
+def run_telegram_send(args: argparse.Namespace, settings: Settings, today: date) -> int:
+    chat_id = telegram_chat_id(settings)
+    return _send_messages(
+        args, settings, today, chat_id=chat_id, make_client=build_telegram_client, deliver=deliver_telegram_message,
+        kinds=dict(morning=args.telegram_send_morning, alert=args.telegram_send_alert,
+                   actuals=args.telegram_send_actuals, upcoming=args.telegram_send_upcoming),
+        destination_text=f"telegram_channel ({describe_chat(chat_id)}) via telegram", id_label="Telegram message ID")
 
 
 def run_preview(args: argparse.Namespace, settings: Settings, today: date) -> int:
@@ -550,6 +611,16 @@ def run_report(args: argparse.Namespace, settings: Settings, today: date) -> int
     return 0
 
 
+def _guarded(run, name: str, args: argparse.Namespace, settings: Settings, today: date) -> int:
+    """Run one channel's send, turning its configuration or connection error into an exit code."""
+    try:
+        return run(args, settings, today)
+    except DeliveryError as exc:
+        logging.getLogger(__name__).error("%s error: %s", name.capitalize(), exc)
+        print(f"{name} ERROR: {exc}", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -569,17 +640,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.recheck_released and not args.enrich_actuals:
         print("--dry-run and --recheck-released only apply together with --enrich-actuals.", file=sys.stderr)
         return 2
-    if args.dry_run and not (args.enrich_actuals or wants_whatsapp_send(args)):
+    sending = wants_whatsapp_send(args) or wants_telegram_send(args)
+    if args.dry_run and not (args.enrich_actuals or sending):
         print("--dry-run and --recheck-released only apply together with --enrich-actuals "
-              "(--dry-run also with a --whatsapp-send-... option).", file=sys.stderr)
+              "(--dry-run also with a --whatsapp-send-... or --telegram-send-... option).", file=sys.stderr)
         return 2
-    if args.fixture and wants_whatsapp_send(args) and not args.dry_run:
-        print("Sample events (--fixture) can only be used with --dry-run when sending to WhatsApp.", file=sys.stderr)
+    if args.fixture and sending and not args.dry_run:
+        print("Sample events (--fixture) can only be used with --dry-run when sending to WhatsApp or Telegram.", file=sys.stderr)
         return 2
 
     tz = ZoneInfo(settings.display_timezone) if settings.display_timezone else timezone.utc
     today = datetime.now(tz).date()
-    if args.fixture and not (wants_preview(args) or wants_whatsapp_send(args)):
+    if args.fixture and not (wants_preview(args) or sending):
         print("--fixture only applies together with a --preview-... option.", file=sys.stderr)
         return 2
 
@@ -588,8 +660,18 @@ def main(argv: list[str] | None = None) -> int:
             return run_whatsapp_check(settings)
         if args.whatsapp_test:
             return run_whatsapp_test(settings)
-        if wants_whatsapp_send(args):
-            return run_whatsapp_send(args, settings, today)
+        if args.telegram_check:
+            return run_telegram_check(settings)
+        if args.telegram_test:
+            return run_telegram_test(settings)
+        if sending:
+            # WhatsApp and Telegram are independent: one failing does not stop the other.
+            codes = []
+            if wants_whatsapp_send(args):
+                codes.append(_guarded(run_whatsapp_send, "WHATSAPP", args, settings, today))
+            if wants_telegram_send(args):
+                codes.append(_guarded(run_telegram_send, "TELEGRAM", args, settings, today))
+            return max(codes)
         if wants_preview(args):
             return run_preview(args, settings, today)
         if run_maintenance(args, settings, today):
@@ -599,9 +681,10 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger(__name__).error("Configuration file error: %s", exc)
         print(f"CONFIGURATION ERROR: {exc}", file=sys.stderr)
         return 2
-    except WhapiError as exc:
-        logging.getLogger(__name__).error("WhatsApp error: %s", exc)
-        print(f"WHATSAPP ERROR: {exc}", file=sys.stderr)
+    except DeliveryError as exc:
+        name = "TELEGRAM" if type(exc).__name__.startswith("Telegram") else "WHATSAPP"
+        logging.getLogger(__name__).error("%s error: %s", name.capitalize(), exc)
+        print(f"{name} ERROR: {exc}", file=sys.stderr)
         return 1
     except DatabaseError as exc:
         logging.getLogger(__name__).error("Database error: %s", exc)

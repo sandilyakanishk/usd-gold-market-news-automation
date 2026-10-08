@@ -27,6 +27,8 @@ VARIABLES = (
     ("WHATSAPP_COMMUNITY_ID", "WhatsApp Community, used to confirm the group", True),
     ("FRED_API_KEY", "FRED key for PCE, GDP, retail sales, claims, Fed funds", True),
     ("BLS_API_KEY", "optional BLS key (raises the daily request limit)", False),
+    ("TELEGRAM_BOT_TOKEN", "optional: Telegram bot token, for posting to a channel", False),
+    ("TELEGRAM_CHAT_ID", "optional: Telegram channel the bot posts to", False),
 )
 
 
