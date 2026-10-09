@@ -580,7 +580,8 @@ def run_telegram_videos(args: argparse.Namespace, settings: Settings, today: dat
     client = None if args.dry_run else build_telegram_client(settings)
     with open_database(settings) as db:
         try:
-            results = social.send_new_videos(db, client, settings, chat_id, dry_run=args.dry_run)
+            results = social.send_new_videos(db, client, settings, chat_id, dry_run=args.dry_run,
+                                             check_stream=live.stream_checker(settings))
         except social.VideoFeedError as exc:
             logging.getLogger(__name__).warning("Video forwarding: %s", exc)
             print(f"VIDEO FEED ERROR: {exc} It is retried on the next run.", file=sys.stderr)

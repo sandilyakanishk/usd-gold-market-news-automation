@@ -49,6 +49,8 @@ MIN_IMAGE_BYTES, MAX_IMAGE_BYTES = 5_000, 10 * 1024 * 1024
 _IMAGE_URL = re.compile(r"^https://i\d?\.ytimg\.com/vi/[A-Za-z0-9_-]{6,20}/[a-z0-9_]+\.jpg$")
 _CHANNEL_ID = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
 _VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{6,20}$")
+_STREAM_MARKS = ('"isLiveContent":true', '"isLive":true', '"isUpcoming":true', '"liveBroadcastDetails"')
+_PLAYABILITY = re.compile(r'"playabilityStatus":\{"status":"([A-Z_]+)"')
 _INSTAGRAM_PROFILE = re.compile(r"^https://(?:www\.)?instagram\.com/([A-Za-z0-9._]{1,30})/?(?:\?.*)?$")
 _NS = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015",
        "media": "http://search.yahoo.com/mrss/"}
@@ -206,9 +208,12 @@ def is_stream(video: Video, *, timeout: int = 20, user_agent: str = "") -> bool 
             page = response.read(5 * 1024 * 1024).decode("utf-8", errors="replace")
     except (urllib.error.URLError, TimeoutError, OSError):
         return None
-    if '"playabilityStatus"' not in page:
-        return None  # not a page this code understands
-    return any(mark in page for mark in ('"isLiveContent":true', '"isLive":true', '"isUpcoming":true', '"liveBroadcastDetails"'))
+    if any(mark in page for mark in _STREAM_MARKS):
+        return True
+    # "Not a stream" is only believed from the real video page. YouTube sometimes answers a server with a
+    # sign-in or consent page instead (playability LOGIN_REQUIRED, or none at all), which says nothing either way.
+    status = _PLAYABILITY.search(page)
+    return False if status is not None and status.group(1) == "OK" else None
 
 
 class CoverNotReady(TelegramError):
@@ -262,8 +267,8 @@ def send_new_videos(db: EventRepository, client: TelegramClient | None, settings
     for video in new:
         caption = build_caption(video, clean_profile_url(settings.instagram_profile_url))
         if not video.is_short and db.get_delivery(video.message_key, PROVIDER_TELEGRAM, chat_id) is None:
-            # A stream has its own alert. If the page cannot be read, nothing is posted yet: the next run asks again.
-            if check_stream(video) is not False:
+            # A stream has its own alert. If it cannot be told what this is, nothing is posted yet: the next run asks again.
+            if db.get_delivery(f"LIVE_YT_{video.video_id}", PROVIDER_TELEGRAM, chat_id) is not None or check_stream(video) is not False:
                 continue
         if posted >= MAX_POSTS_PER_RUN and db.get_delivery(video.message_key, PROVIDER_TELEGRAM, chat_id) is None:
             continue  # the next run picks it up

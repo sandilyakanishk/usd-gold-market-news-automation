@@ -270,6 +270,30 @@ def find_live_on_page(channel_id: str, *, timeout: int = 20, user_agent: str = "
     return streams
 
 
+def stream_checker(settings: Settings, *, get=api_get):
+    """For video forwarding: a function telling whether a video is a stream, using the official API.
+
+    Only available with an API key; returns None without one. The function
+    itself returns None when the API cannot answer, so nothing is posted on a guess.
+    """
+    if not settings.youtube_api_key:
+        return None
+
+    def check(video) -> bool | None:
+        try:
+            data = get("videos", {"part": "snippet,liveStreamingDetails", "id": video.video_id}, settings.youtube_api_key,
+                       timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
+        except LiveCheckError as exc:
+            log.warning("Video check: %s", exc)
+            return None
+        for item in data.get("items") or []:
+            if isinstance(item, dict) and item.get("id") == video.video_id:
+                broadcast = (item.get("snippet") or {}).get("liveBroadcastContent")
+                return bool(item.get("liveStreamingDetails")) or broadcast in ("live", "upcoming")
+        return None
+    return check
+
+
 # -- text -----------------------------------------------------------------------------------
 
 def build_alert(stream: LiveStream, instagram_url: str | None = None) -> str:
@@ -343,7 +367,7 @@ def send_live_alerts(db: EventRepository, client: TelegramClient | None, setting
 
 __all__ = [
     "LiveCheckError", "LiveStream", "MESSAGE_TYPE", "OUTCOME_ALREADY_SENT", "OUTCOME_DRY_RUN", "OUTCOME_FAILED",
-    "OUTCOME_SENT", "api_get", "build_alert", "find_live", "find_live_on_page", "parse_live_page", "parse_watch_page", "recent_stream_ids", "newest_video_ids", "parse_live", "send_live_alerts",
+    "OUTCOME_SENT", "api_get", "build_alert", "find_live", "find_live_on_page", "parse_live_page", "parse_watch_page", "recent_stream_ids", "newest_video_ids", "parse_live", "send_live_alerts", "stream_checker",
     "uploads_playlist",
 ]
 

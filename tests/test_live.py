@@ -332,6 +332,32 @@ def test_reading_the_page_asks_only_youtube_for_the_configured_channel(monkeypat
         live.find_live_on_page(CHANNEL, fetch_feed=no_feed)
 
 
+def test_with_a_key_the_api_says_whether_a_video_is_a_stream():
+    clip = SimpleNamespace(video_id="PlainVideo1")
+    assert live.stream_checker(SimpleNamespace(**{**vars(SETTINGS), "youtube_api_key": None})) is None
+
+    def reply(items):
+        return lambda resource, params, api_key, **options: {"items": items}
+    cases = [
+        ([{"id": "PlainVideo1", "snippet": {"liveBroadcastContent": "none"}}], False),
+        ([{"id": "PlainVideo1", "snippet": {"liveBroadcastContent": "none"}, "liveStreamingDetails": {"actualEndTime": "x"}}], True),
+        ([{"id": "PlainVideo1", "snippet": {"liveBroadcastContent": "upcoming"}}], True),
+        ([{"id": "PlainVideo1", "snippet": {"liveBroadcastContent": "live"}, "liveStreamingDetails": {}}], True),
+        ([], None), ([{"id": "SomeOther11", "snippet": {}}], None),
+    ]
+    for items, expected in cases:
+        assert live.stream_checker(SETTINGS, get=reply(items))(clip) is expected, items
+
+    def down(resource, params, api_key, **options):
+        raise live.LiveCheckError("YouTube's API answered HTTP 403 (quotaExceeded).")
+    assert live.stream_checker(SETTINGS, get=down)(clip) is None
+
+
+def test_a_sign_in_page_is_not_mistaken_for_a_stream_that_is_off_air_or_on():
+    blocked = '<html><script>{"playabilityStatus":{"status":"LOGIN_REQUIRED"}}</script>Sign in to confirm</html>'
+    assert live.parse_watch_page(blocked, "LiveNow1234") is None
+
+
 # -- text ----------------------------------------------------------------------------------
 
 def test_alert_text():

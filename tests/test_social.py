@@ -394,6 +394,17 @@ def test_a_live_stream_is_never_announced_as_a_new_video(db):
     assert db.get_delivery("VIDEO_YT_StreamVid11", PROVIDER_TELEGRAM, CHAT) is None
 
 
+def test_a_stream_that_was_announced_live_is_never_also_a_new_video(db):
+    from src.delivery.models import DeliveryRecord
+    stamp = "2026-10-08T13:31:00Z"
+    db.save_delivery(DeliveryRecord(message_key="LIVE_YT_StreamVid11", provider=PROVIDER_TELEGRAM, destination_id=CHAT,
+                                    destination="telegram_channel", message_type="LIVE_ALERT", status="SENT",
+                                    provider_message_id="9", sent_at=stamp, created_at=stamp, updated_at=stamp))
+    client, check = FakeTelegram(), stream_check()                     # even if the page check wrongly says "not a stream"
+    assert social.send_new_videos(db, client, ALL, CHAT, fetch=fetcher(feed(NEW_STREAM)), now=NOW, check_stream=check) == []
+    assert client.photos == [] and check.asked == []
+
+
 def test_a_video_whose_page_cannot_be_read_waits_for_the_next_run(db):
     client = FakeTelegram()
     unsure = social.send_new_videos(db, client, ALL, CHAT, fetch=fetcher(feed(NEW_VIDEO)), now=NOW, check_stream=stream_check(unreadable={"PlainVideo1"}))
@@ -428,6 +439,9 @@ class _Page:
     ('{"playabilityStatus":{"status":"LIVE_STREAM_OFFLINE"},"isLive":true,"isUpcoming":true}', True),
     ('{"playabilityStatus":{"status":"OK"},"liveBroadcastDetails":{"isLiveNow":false,"endTimestamp":"2026-10-08T12:41:19+00:00"}}', True),
     ("<html>Before you continue to YouTube</html>", None),
+    # What GitHub's runner was served for a finished stream on 9 October: a sign-in page with no stream markers.
+    ('{"playabilityStatus":{"status":"LOGIN_REQUIRED","reason":"Sign in to confirm you are not a bot"}}', None),
+    ('{"playabilityStatus":{"status":"UNPLAYABLE"}}', None), ('{"playabilityStatus":{"status":"ERROR"}}', None),
 ])
 def test_telling_a_stream_from_a_video(monkeypatch, page, expected):
     monkeypatch.setattr(social.urllib.request, "urlopen", lambda request, timeout=0: _Page(page))

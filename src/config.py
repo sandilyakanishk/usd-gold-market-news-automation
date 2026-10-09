@@ -85,7 +85,7 @@ class Settings:
     telegram_chat_id: str | None = None  # "@channelname" or a numeric id
     gold_price_url: str = DEFAULT_GOLD_PRICE_URL  # free XAU/USD quote for the market pulse; no key
     youtube_channel_id: str | None = None  # the owner's channel (UC...); its new Shorts are forwarded to Telegram
-    youtube_forward: str = "shorts"  # "shorts", or "all" to include ordinary videos (streams have their own alert)
+    youtube_forward: str = "all"  # "all" (Shorts and ordinary videos; streams have their own alert) or "shorts"
     video_posts_since: str = DEFAULT_VIDEO_POSTS_SINCE  # older uploads are never forwarded
     instagram_profile_url: str | None = None  # shown under every forwarded video
     youtube_api_key: str | None = None  # YouTube Data API key for the live alert; secret, never logged
@@ -129,7 +129,7 @@ class Settings:
             telegram_chat_id=env("TELEGRAM_CHAT_ID") or None,
             gold_price_url=env("GOLD_PRICE_URL") or DEFAULT_GOLD_PRICE_URL,
             youtube_channel_id=(env("YOUTUBE_CHANNEL_ID") or "").strip() or None,
-            youtube_forward=_youtube_forward(env("YOUTUBE_FORWARD") or "shorts"),
+            youtube_forward=_youtube_forward(env("YOUTUBE_FORWARD") or "all"),
             video_posts_since=env("VIDEO_POSTS_SINCE") or DEFAULT_VIDEO_POSTS_SINCE,
             instagram_profile_url=(env("INSTAGRAM_PROFILE_URL") or "").strip() or None,
             youtube_api_key=(env("YOUTUBE_API_KEY") or "").strip() or None,
