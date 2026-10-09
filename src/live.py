@@ -9,10 +9,11 @@ is announced once however many runs see it.
 
 Two ways of finding out, chosen by configuration:
 
-  no key (default)   one GET of the channel's public page
-                     youtube.com/channel/<id>/live, which shows the stream
-                     that is on air, if any. Nothing to set up, but it reads
-                     a web page, so a change on YouTube's side can break it.
+  no key (default)   the channel's public page youtube.com/channel/<id>/live,
+                     and, because that page does not show every stream, the
+                     own pages of the channel's newest videos from its feed.
+                     Nothing to set up, but it reads web pages, so a change
+                     on YouTube's side can break it.
   YOUTUBE_API_KEY    YouTube's official Data API (two units per run). The
                      key travels in a request header, never in an address,
                      and never appears in a message or a log line.
@@ -28,7 +29,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import social
 from .config import Settings
@@ -163,6 +164,9 @@ def find_live(channel_id: str, api_key: str, *, extra_ids: list[str] | None = No
 # -- the public page (no key) -----------------------------------------------------------------
 
 LIVE_PAGE = "https://www.youtube.com/channel/{channel_id}/live"
+WATCH_PAGE = "https://www.youtube.com/watch?v={video_id}"
+RECENT_STREAM_AGE = timedelta(hours=24)
+MAX_CANDIDATES = 3  # at most this many video pages are read per check
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 _CANONICAL = re.compile(r'<link rel="canonical" href="https://www\.youtube\.com/(watch\?v=([A-Za-z0-9_-]{6,20})|channel/[A-Za-z0-9_-]+)"')
 _TITLE = re.compile(r'<meta name="title" content="([^"]*)"')
@@ -189,19 +193,81 @@ def parse_live_page(page: str) -> list[LiveStream]:
     return [LiveStream(video_id, html.unescape(title.group(1)).strip() if title else "", None)]
 
 
-def find_live_on_page(channel_id: str, *, timeout: int = 20, user_agent: str = "") -> list[LiveStream]:
-    if not social._CHANNEL_ID.match(channel_id or ""):
-        raise LiveCheckError("YOUTUBE_CHANNEL_ID is not a YouTube channel id (it starts with UC and has 24 characters).")
-    request = urllib.request.Request(LIVE_PAGE.format(channel_id=channel_id),
-                                     headers={"User-Agent": user_agent, "Accept-Language": "en-US,en"})
+def _get_page(url: str, *, timeout: int, user_agent: str, what: str) -> str:
+    request = urllib.request.Request(url, headers={"User-Agent": user_agent, "Accept-Language": "en-US,en"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            page = response.read(MAX_PAGE_BYTES).decode("utf-8", errors="replace")
+            return response.read(MAX_PAGE_BYTES).decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
-        raise LiveCheckError(f"YouTube's live page answered HTTP {exc.code}.") from None
+        raise LiveCheckError(f"YouTube's {what} answered HTTP {exc.code}.") from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise LiveCheckError(f"YouTube's live page could not be reached: {type(exc).__name__}.") from None
-    return parse_live_page(page)
+        raise LiveCheckError(f"YouTube's {what} could not be reached: {type(exc).__name__}.") from None
+
+
+def parse_watch_page(page: str, video_id: str) -> LiveStream | None:
+    """The broadcast a video's own page describes, if it is on air right now.
+
+    A stream that has been set up but has not started says "isUpcoming" and
+    LIVE_STREAM_OFFLINE; a finished one no longer says "isLive".
+    """
+    if '"isLiveNow":true' in page:
+        on_air = True
+    elif '"isLiveNow":false' in page:
+        on_air = False
+    else:
+        on_air = '"isLive":true' in page and '"isUpcoming":true' not in page and '"status":"LIVE_STREAM_OFFLINE"' not in page
+    if not on_air:
+        return None
+    title = _TITLE.search(page)
+    return LiveStream(video_id, html.unescape(title.group(1)).strip() if title else "", None)
+
+
+def recent_stream_ids(channel_id: str, *, now: datetime | None = None, fetch_feed=None, **options) -> list[str]:
+    """Videos from the channel's feed that could be a broadcast on air: the newest ordinary video
+    (a stream is listed as one) and any others published within the last day. Shorts are never streams."""
+    fetch_feed = fetch_feed or social.fetch_feed
+    now = now or datetime.now(timezone.utc)
+    videos = sorted((v for v in fetch_feed(channel_id, **options) if not v.is_short), key=lambda v: v.published, reverse=True)
+    recent = [v.video_id for v in videos if now - v.published <= RECENT_STREAM_AGE]
+    newest = [videos[0].video_id] if videos else []
+    return list(dict.fromkeys(newest + recent))[:MAX_CANDIDATES]
+
+
+def find_live_on_page(channel_id: str, *, timeout: int = 20, user_agent: str = "", now: datetime | None = None,
+                      get_page=_get_page, fetch_feed=None) -> list[LiveStream]:
+    """Find a broadcast on air without an API key.
+
+    Two looks, because YouTube's /live page does not show every stream:
+      1. the channel's /live page, which is the stream's own page when it does;
+      2. the channel's feed, whose newest ordinary videos are each checked on their own page.
+    One of the two failing is tolerated; both failing is an error.
+    """
+    if not social._CHANNEL_ID.match(channel_id or ""):
+        raise LiveCheckError("YOUTUBE_CHANNEL_ID is not a YouTube channel id (it starts with UC and has 24 characters).")
+    options = dict(timeout=timeout, user_agent=user_agent)
+    problems, streams = [], []
+    try:
+        streams = parse_live_page(get_page(LIVE_PAGE.format(channel_id=channel_id), what="live page", **options))
+    except LiveCheckError as exc:
+        problems.append(str(exc))
+    if streams:
+        return streams
+    try:
+        candidates = recent_stream_ids(channel_id, now=now, fetch_feed=fetch_feed, **options)
+    except social.VideoFeedError as exc:
+        problems.append(str(exc))
+        candidates = None
+    if candidates is None and len(problems) == 2:
+        raise LiveCheckError(" ".join(problems))
+    for video_id in candidates or []:
+        try:
+            stream = parse_watch_page(get_page(WATCH_PAGE.format(video_id=video_id), what="video page", **options), video_id)
+        except LiveCheckError as exc:
+            log.warning("Live check: %s", exc)
+            continue
+        if stream is not None:
+            streams.append(stream)
+    return streams
 
 
 # -- text -----------------------------------------------------------------------------------
@@ -272,6 +338,6 @@ def send_live_alerts(db: EventRepository, client: TelegramClient | None, setting
 
 __all__ = [
     "LiveCheckError", "LiveStream", "MESSAGE_TYPE", "OUTCOME_ALREADY_SENT", "OUTCOME_DRY_RUN", "OUTCOME_FAILED",
-    "OUTCOME_SENT", "api_get", "build_alert", "find_live", "find_live_on_page", "parse_live_page", "newest_video_ids", "parse_live", "send_live_alerts",
+    "OUTCOME_SENT", "api_get", "build_alert", "find_live", "find_live_on_page", "parse_live_page", "parse_watch_page", "recent_stream_ids", "newest_video_ids", "parse_live", "send_live_alerts",
     "uploads_playlist",
 ]

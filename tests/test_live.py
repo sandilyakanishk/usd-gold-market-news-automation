@@ -206,6 +206,101 @@ def test_with_a_key_the_api_is_used_and_the_page_is_not_read(db):
     assert result[0][1].outcome == OUTCOME_SENT
 
 
+# -- the second look: the channel's newest videos ----------------------------------------
+
+def watch(*markers, title="WealthwithSG LIVE FOREX TRADING"):
+    return f'<html><head><meta name="title" content="{title}"></head><script>' + ",".join(markers) + "</script></html>"
+
+
+WAITING = watch('"playabilityStatus":{"status":"LIVE_STREAM_OFFLINE","reason":"This live event will begin in a few moments."}',
+                '"isLive":true', '"isUpcoming":true', '"liveBroadcastDetails":{"isLiveNow":false}')
+STREAMING = watch('"playabilityStatus":{"status":"OK"}', '"isLive":true', '"liveBroadcastDetails":{"isLiveNow":true}')
+STREAMING_OLD_MARKUP = watch('"playabilityStatus":{"status":"OK"}', '"isLive":true', '"isLiveContent":true')
+ENDED = watch('"playabilityStatus":{"status":"OK"}', '"isLiveContent":true', '"liveBroadcastDetails":{"isLiveNow":false}')
+ORDINARY = watch('"playabilityStatus":{"status":"OK"}')
+
+
+def test_a_video_page_tells_on_air_from_waiting_from_ended():
+    assert live.parse_watch_page(STREAMING, "LiveNow1234").title == "WealthwithSG LIVE FOREX TRADING"
+    assert live.parse_watch_page(STREAMING_OLD_MARKUP, "LiveNow1234") is not None
+    # Exactly what the real page said while the stream was set up but had not started.
+    assert live.parse_watch_page(WAITING, "LiveNow1234") is None
+    assert live.parse_watch_page(ENDED, "LiveNow1234") is None and live.parse_watch_page(ORDINARY, "LiveNow1234") is None
+
+
+def feed_of(*videos):
+    def fetch_feed(channel_id, **options):
+        return [social.Video(vid, "t", "", f"https://www.youtube.com/{'shorts/' if short else 'watch?v='}{vid}", published, None, short)
+                for vid, published, short in videos]
+    return fetch_feed
+
+
+NOW = datetime(2026, 10, 9, 9, 40, tzinfo=timezone.utc)
+FEED = feed_of(("NewStream11", NOW.replace(minute=34), False), ("OldStream22", NOW.replace(hour=1, minute=21), False),
+               ("ShortVid333", NOW.replace(minute=30), True), ("WeekOld4444", datetime(2026, 10, 2, tzinfo=timezone.utc), False))
+
+
+def pages(mapping):
+    asked = []
+
+    def get_page(url, *, what, **options):
+        asked.append(url)
+        for key, page in mapping.items():
+            if key in url:
+                if isinstance(page, Exception):
+                    raise page
+                return page
+        raise AssertionError(f"unexpected request {url}")
+    get_page.asked = asked
+    return get_page
+
+
+def test_a_stream_the_live_page_does_not_show_is_found_through_the_feed():
+    """What happened on 9 October: the /live page was the plain channel page while a stream existed."""
+    get_page = pages({"/live": NOTHING_ON, "NewStream11": STREAMING, "OldStream22": ENDED})
+    streams = live.find_live_on_page(CHANNEL, now=NOW, get_page=get_page, fetch_feed=FEED)
+    assert [s.video_id for s in streams] == ["NewStream11"]
+    # Shorts and week-old videos are not looked at.
+    assert [u.split("/")[-1] for u in get_page.asked] == ["live", "watch?v=NewStream11", "watch?v=OldStream22"]
+
+
+def test_a_stream_that_is_set_up_but_not_started_is_not_announced_until_it_starts():
+    waiting = pages({"/live": NOTHING_ON, "NewStream11": WAITING, "OldStream22": ENDED})
+    assert live.find_live_on_page(CHANNEL, now=NOW, get_page=waiting, fetch_feed=FEED) == []
+    started = pages({"/live": NOTHING_ON, "NewStream11": STREAMING, "OldStream22": ENDED})
+    assert len(live.find_live_on_page(CHANNEL, now=NOW, get_page=started, fetch_feed=FEED)) == 1
+
+
+def test_when_the_live_page_shows_the_stream_no_other_page_is_read():
+    get_page = pages({"/live": ON_AIR})
+    assert [s.video_id for s in live.find_live_on_page(CHANNEL, now=NOW, get_page=get_page, fetch_feed=FEED)] == ["LiveNow1234"]
+    assert len(get_page.asked) == 1
+
+
+def test_one_look_failing_is_tolerated_and_both_failing_is_an_error():
+    def no_feed(channel_id, **options):
+        raise social.VideoFeedError("YouTube's feed answered HTTP 500.")
+    # The live page is a consent page: the feed still finds the stream.
+    odd_page = pages({"/live": "<html>Before you continue</html>", "NewStream11": STREAMING, "OldStream22": ENDED})
+    assert len(live.find_live_on_page(CHANNEL, now=NOW, get_page=odd_page, fetch_feed=FEED)) == 1
+    # The feed is down: the live page's answer stands.
+    assert live.find_live_on_page(CHANNEL, now=NOW, get_page=pages({"/live": NOTHING_ON}), fetch_feed=no_feed) == []
+    with pytest.raises(live.LiveCheckError):
+        live.find_live_on_page(CHANNEL, now=NOW, get_page=pages({"/live": "<html>Before you continue</html>"}), fetch_feed=no_feed)
+    # One video page failing does not hide another video's stream.
+    broken = pages({"/live": NOTHING_ON, "NewStream11": live.LiveCheckError("video page answered HTTP 429."), "OldStream22": STREAMING})
+    assert [s.video_id for s in live.find_live_on_page(CHANNEL, now=NOW, get_page=broken, fetch_feed=FEED)] == ["OldStream22"]
+
+
+def test_the_newest_video_is_always_checked_even_if_it_was_created_long_ago():
+    """A stream scheduled days ahead keeps its old date in the feed until it goes live."""
+    old_only = feed_of(("Scheduled11", datetime(2026, 10, 1, tzinfo=timezone.utc), False), ("Older222222", datetime(2026, 9, 20, tzinfo=timezone.utc), False))
+    assert live.recent_stream_ids(CHANNEL, now=NOW, fetch_feed=old_only) == ["Scheduled11"]
+    assert live.recent_stream_ids(CHANNEL, now=NOW, fetch_feed=feed_of()) == []
+    many = feed_of(*[(f"Stream{i:05d}", NOW.replace(minute=i), False) for i in range(6)])
+    assert len(live.recent_stream_ids(CHANNEL, now=NOW, fetch_feed=many)) == 3
+
+
 def test_reading_the_page_asks_only_youtube_for_the_configured_channel(monkeypatch):
     seen = {}
 
@@ -213,17 +308,19 @@ def test_reading_the_page_asks_only_youtube_for_the_configured_channel(monkeypat
         seen["url"] = request.full_url
         return _ctx(io.BytesIO(NOTHING_ON.encode("utf-8")))
     monkeypatch.setattr(live.urllib.request, "urlopen", opened)
-    assert live.find_live_on_page(CHANNEL) == []
+    assert live.find_live_on_page(CHANNEL, fetch_feed=feed_of()) == []
     assert seen["url"] == f"https://www.youtube.com/channel/{CHANNEL}/live"
     for bad in ("", None, "@handle", "UCshort", CHANNEL + "/../x"):
         with pytest.raises(live.LiveCheckError):
-            live.find_live_on_page(bad)
+            live.find_live_on_page(bad, fetch_feed=feed_of())
 
     def refused(request, timeout=0):
         raise urllib.error.HTTPError(request.full_url, 429, "Too Many Requests", {}, io.BytesIO(b""))
     monkeypatch.setattr(live.urllib.request, "urlopen", refused)
+    def no_feed(channel_id, **options):
+        raise social.VideoFeedError("YouTube's feed answered HTTP 429.")
     with pytest.raises(live.LiveCheckError, match="HTTP 429"):
-        live.find_live_on_page(CHANNEL)
+        live.find_live_on_page(CHANNEL, fetch_feed=no_feed)
 
 
 # -- text ----------------------------------------------------------------------------------
