@@ -160,7 +160,7 @@ def clean_profile_url(value: str | None) -> str | None:
 
 def build_caption(video: Video, instagram_url: str | None = None) -> str:
     """The owner's own words, unchanged, with the links. Shortened only to fit Telegram's limit."""
-    header = "🎬 NEW REEL" if video.is_short else "🎬 NEW VIDEO"
+    header = "🎬 NEW REEL" if video.is_short else "📺 NEW YOUTUBE VIDEO"
     footer = f"▶️ YouTube: {video.link}"
     if instagram_url:
         footer += f"\n📸 Instagram: {instagram_url}"
@@ -188,6 +188,27 @@ def download_image(url: str, *, timeout: int = 20, user_agent: str = "") -> byte
     if not kind.startswith("image/jpeg") or not (MIN_IMAGE_BYTES <= len(data) <= MAX_IMAGE_BYTES) or data[:2] != b"\xff\xd8":
         return None
     return data
+
+
+def is_stream(video: Video, *, timeout: int = 20, user_agent: str = "") -> bool | None:
+    """Whether an ordinary-looking video is really a live stream (on air, scheduled, or a finished one's replay).
+
+    YouTube's feed lists a stream like any other video. Streams have their own
+    alert, so they are not announced as a new video. Returns None when the
+    video's page cannot be read, so the caller can try again later.
+    """
+    if not _VIDEO_ID.match(video.video_id):
+        return None
+    request = urllib.request.Request(f"https://www.youtube.com/watch?v={video.video_id}",
+                                     headers={"User-Agent": user_agent, "Accept-Language": "en-US,en"})
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            page = response.read(5 * 1024 * 1024).decode("utf-8", errors="replace")
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+    if '"playabilityStatus"' not in page:
+        return None  # not a page this code understands
+    return any(mark in page for mark in ('"isLiveContent":true', '"isLive":true', '"isUpcoming":true', '"liveBroadcastDetails"'))
 
 
 class CoverNotReady(TelegramError):
@@ -226,7 +247,7 @@ class _PhotoPost:
 
 def send_new_videos(db: EventRepository, client: TelegramClient | None, settings: Settings, chat_id: str, *,
                     dry_run: bool = False, now: datetime | None = None, fetch=fetch_feed, download=None,
-                    ) -> list[tuple[Video, DeliveryResult, str]]:
+                    check_stream=None) -> list[tuple[Video, DeliveryResult, str]]:
     """Post every new video once. Returns (video, result, caption) for each one considered."""
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     if download is None:
@@ -234,9 +255,16 @@ def send_new_videos(db: EventRepository, client: TelegramClient | None, settings
             return download_image(url, timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
     videos = fetch(settings.youtube_channel_id, timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
     new = select_new(videos, since=parse_since(settings.video_posts_since), kinds=settings.youtube_forward, now=now)
+    if check_stream is None:
+        def check_stream(video: Video) -> bool | None:
+            return is_stream(video, timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
     results, posted = [], 0
     for video in new:
         caption = build_caption(video, clean_profile_url(settings.instagram_profile_url))
+        if not video.is_short and db.get_delivery(video.message_key, PROVIDER_TELEGRAM, chat_id) is None:
+            # A stream has its own alert. If the page cannot be read, nothing is posted yet: the next run asks again.
+            if check_stream(video) is not False:
+                continue
         if posted >= MAX_POSTS_PER_RUN and db.get_delivery(video.message_key, PROVIDER_TELEGRAM, chat_id) is None:
             continue  # the next run picks it up
         result = deliver_text(
@@ -251,5 +279,5 @@ def send_new_videos(db: EventRepository, client: TelegramClient | None, settings
 
 __all__ = [
     "ALL", "MAX_POSTS_PER_RUN", "MESSAGE_TYPE", "OUTCOME_ALREADY_SENT", "SHORTS", "Video", "VideoFeedError",
-    "CoverNotReady", "build_caption", "clean_profile_url", "download_image", "fetch_feed", "parse_feed", "parse_since", "select_new", "send_new_videos",
+    "CoverNotReady", "build_caption", "clean_profile_url", "download_image", "fetch_feed", "is_stream", "parse_feed", "parse_since", "select_new", "send_new_videos",
 ]

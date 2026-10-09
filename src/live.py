@@ -322,7 +322,12 @@ def send_live_alerts(db: EventRepository, client: TelegramClient | None, setting
             return social.download_image(url, timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
     options = dict(timeout=settings.request_timeout_seconds, user_agent=settings.user_agent)
     if settings.youtube_api_key:
-        streams = find_live(settings.youtube_channel_id, settings.youtube_api_key, get=get, **options)
+        try:
+            streams = find_live(settings.youtube_channel_id, settings.youtube_api_key, get=get, **options)
+        except LiveCheckError as exc:
+            # The official route failed (quota, outage): the public pages are still worth a look.
+            log.warning("Live check: %s Falling back to the public pages.", exc)
+            streams = read_page(settings.youtube_channel_id, **options)
     else:
         streams = read_page(settings.youtube_channel_id, **options)
     results = []

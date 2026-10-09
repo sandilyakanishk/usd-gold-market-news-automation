@@ -1031,9 +1031,15 @@ the next post's change line compares with. The table is created by
 
 ## Video forwarding (Telegram only)
 
-When a new YouTube Short appears on the owner's channel, it is posted to the
-Telegram channel: the cover image, the title and description exactly as
-written on YouTube, and the link.
+When a new YouTube Short or an ordinary video appears on the owner's
+channel, it is posted to the Telegram channel: the cover image, the title and
+description exactly as written on YouTube, and the link. A Short is headed
+"NEW REEL", a video "NEW YOUTUBE VIDEO".
+
+A live stream is listed in the feed like a video, but it has its own alert
+(see "Live alert"), so it is not announced here: each new ordinary video's
+page is read once to tell the two apart, and a stream (on air, scheduled, or
+a finished one's replay) is skipped.
 
 ```bash
 python -m src.main --telegram-send-videos --dry-run   # show what would be posted
@@ -1045,8 +1051,8 @@ python -m src.main --telegram-send-videos             # post new videos
   scraping, and no video file is downloaded. The feed lists the latest 15
   uploads and can lag a few minutes behind YouTube.
 - **Settings.** `YOUTUBE_CHANNEL_ID` (the id starting with `UC`; empty
-  switches the feature off), `YOUTUBE_FORWARD` (`shorts`, the default, or
-  `all` to include long videos and live streams) and `VIDEO_POSTS_SINCE`
+  switches the feature off), `YOUTUBE_FORWARD` (`all`, the default, or
+  `shorts` for Shorts only) and `VIDEO_POSTS_SINCE`
   (uploads published earlier are never forwarded). `INSTAGRAM_PROFILE_URL`,
   if set, adds the owner's Instagram profile link under the YouTube link.
 - **Once per video.** The video id is the message identity

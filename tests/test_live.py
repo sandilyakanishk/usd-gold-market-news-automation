@@ -198,6 +198,15 @@ def test_without_a_key_the_page_is_read_and_the_api_is_not_called(db):
     assert "XAUUSD & GOLD" in client.photos[0][2] and "watch?v=LiveNow1234" in client.photos[0][2]
 
 
+def test_if_the_api_fails_the_public_pages_are_used_instead(db):
+    def api_down(resource, params, api_key, **options):
+        raise live.LiveCheckError("YouTube's API answered HTTP 403 (quotaExceeded).")
+    client = FakeTelegram()
+    result = live.send_live_alerts(db, client, SETTINGS, CHAT, get=api_down, download=covers,
+                                   read_page=lambda channel_id, **options: live.parse_live_page(ON_AIR))
+    assert result[0][1].outcome == OUTCOME_SENT and "watch?v=LiveNow1234" in client.photos[0][2]
+
+
 def test_with_a_key_the_api_is_used_and_the_page_is_not_read(db):
     def page_must_not_be_read(*args, **kwargs):
         raise AssertionError("the page was read although a key is set")

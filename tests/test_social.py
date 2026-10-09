@@ -136,7 +136,7 @@ def test_caption_is_the_owners_words_plus_the_link():
         "🎬 NEW REEL\n\nGold at a key level\n\nWatch till the end.\n#xauusd #gold\n\n"
         "▶️ YouTube: https://www.youtube.com/shorts/AbCdEfGhIjK")
     long_video = social.parse_feed(feed(NEW_LONG))[0]
-    assert social.build_caption(long_video).startswith("🎬 NEW VIDEO\n\nWeekly live stream\n\n▶️ YouTube: ")
+    assert social.build_caption(long_video).startswith("📺 NEW YOUTUBE VIDEO\n\nWeekly live stream\n\n▶️ YouTube: ")
 
 
 def test_caption_always_fits_telegrams_limit_and_keeps_the_link():
@@ -351,6 +351,95 @@ def test_a_video_older_than_a_day_is_never_forwarded_even_if_its_record_is_gone(
     assert client.photos == []
     six_days = datetime(2026, 10, 9, 11, 0, tzinfo=timezone.utc)   # 23 hours after it was published
     assert len(social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(NEW_SHORT)), now=six_days)) == 1
+
+
+# -- ordinary videos -----------------------------------------------------------------------
+
+ALL = SimpleNamespace(**{**vars(SETTINGS), "youtube_forward": "all"})
+NEW_VIDEO = entry("PlainVideo1", "How I plan my trading week", "2026-10-08T13:00:00+00:00", short=False, description="A walk through my routine.")
+NEW_STREAM = entry("StreamVid11", "LIVE FOREX TRADING", "2026-10-08T13:30:00+00:00", short=False)
+
+
+def stream_check(streams=(), unreadable=()):
+    asked = []
+
+    def check(video):
+        asked.append(video.video_id)
+        return None if video.video_id in unreadable else video.video_id in streams
+    check.asked = asked
+    return check
+
+
+def test_an_ordinary_video_gets_its_own_alert(db):
+    client, check = FakeTelegram(), stream_check()
+    results = social.send_new_videos(db, client, ALL, CHAT, fetch=fetcher(feed(NEW_VIDEO, NEW_SHORT)), now=NOW, check_stream=check)
+    assert [(v.video_id, r.outcome) for v, r, _ in results] == [("AbCdEfGhIjK", OUTCOME_SENT), ("PlainVideo1", OUTCOME_SENT)]
+    captions = [p[2] for p in client.photos]
+    assert captions[0].startswith("🎬 NEW REEL") and captions[1].startswith("📺 NEW YOUTUBE VIDEO\n\nHow I plan my trading week\n\nA walk through my routine.")
+    assert "https://www.youtube.com/watch?v=PlainVideo1" in captions[1]
+    assert client.photos[1][1] == "https://i.ytimg.com/vi/PlainVideo1/maxresdefault.jpg"      # the wide cover, not a Short's upright one
+    assert check.asked == ["PlainVideo1"]                                                       # a Short is never a stream
+    # Posted once: the next run does not ask about it or post it again.
+    again = social.send_new_videos(db, client, ALL, CHAT, fetch=fetcher(feed(NEW_VIDEO, NEW_SHORT)), now=NOW, check_stream=check)
+    assert [r.outcome for _, r, _ in again] == [OUTCOME_ALREADY_SENT, OUTCOME_ALREADY_SENT] and len(client.photos) == 2
+    assert check.asked == ["PlainVideo1"]
+
+
+def test_a_live_stream_is_never_announced_as_a_new_video(db):
+    """The feed lists a stream like a video. It has its own alert, so it must not get a second post here."""
+    client = FakeTelegram()
+    results = social.send_new_videos(db, client, ALL, CHAT, fetch=fetcher(feed(NEW_STREAM, NEW_VIDEO)), now=NOW,
+                                     check_stream=stream_check(streams={"StreamVid11"}))
+    assert [v.video_id for v, _, _ in results] == ["PlainVideo1"] and len(client.photos) == 1
+    assert db.get_delivery("VIDEO_YT_StreamVid11", PROVIDER_TELEGRAM, CHAT) is None
+
+
+def test_a_video_whose_page_cannot_be_read_waits_for_the_next_run(db):
+    client = FakeTelegram()
+    unsure = social.send_new_videos(db, client, ALL, CHAT, fetch=fetcher(feed(NEW_VIDEO)), now=NOW, check_stream=stream_check(unreadable={"PlainVideo1"}))
+    assert unsure == [] and client.photos == [] and db.count_deliveries() == 0
+    later = social.send_new_videos(db, client, ALL, CHAT, fetch=fetcher(feed(NEW_VIDEO)), now=NOW, check_stream=stream_check())
+    assert [r.outcome for _, r, _ in later] == [OUTCOME_SENT]
+
+
+def test_shorts_only_mode_still_ignores_ordinary_videos(db):
+    client, check = FakeTelegram(), stream_check()
+    results = social.send_new_videos(db, client, SETTINGS, CHAT, fetch=fetcher(feed(NEW_VIDEO, NEW_SHORT)), now=NOW, check_stream=check)
+    assert [v.video_id for v, _, _ in results] == ["AbCdEfGhIjK"] and check.asked == []
+
+
+class _Page:
+    def __init__(self, text):
+        self._text = text
+
+    def read(self, limit=-1):
+        return self._text.encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+@pytest.mark.parametrize("page, expected", [
+    ('{"playabilityStatus":{"status":"OK"}}', False),
+    ('{"playabilityStatus":{"status":"OK"},"isLiveContent":true}', True),
+    ('{"playabilityStatus":{"status":"LIVE_STREAM_OFFLINE"},"isLive":true,"isUpcoming":true}', True),
+    ('{"playabilityStatus":{"status":"OK"},"liveBroadcastDetails":{"isLiveNow":false,"endTimestamp":"2026-10-08T12:41:19+00:00"}}', True),
+    ("<html>Before you continue to YouTube</html>", None),
+])
+def test_telling_a_stream_from_a_video(monkeypatch, page, expected):
+    monkeypatch.setattr(social.urllib.request, "urlopen", lambda request, timeout=0: _Page(page))
+    video = social.parse_feed(feed(NEW_VIDEO))[0]
+    assert social.is_stream(video) is expected
+
+
+def test_an_unreachable_page_is_unknown_not_a_guess(monkeypatch):
+    def down(request, timeout=0):
+        raise OSError("network down")
+    monkeypatch.setattr(social.urllib.request, "urlopen", down)
+    assert social.is_stream(social.parse_feed(feed(NEW_VIDEO))[0]) is None
 
 
 def _cli_env(monkeypatch, tmp_path, channel=CHANNEL):
