@@ -346,3 +346,39 @@ __all__ = [
     "OUTCOME_SENT", "api_get", "build_alert", "find_live", "find_live_on_page", "parse_live_page", "parse_watch_page", "recent_stream_ids", "newest_video_ids", "parse_live", "send_live_alerts",
     "uploads_playlist",
 ]
+
+
+def diagnose(channel_id: str, *, timeout: int = 20, user_agent: str = "") -> list[str]:
+    """What YouTube's pages look like from where this runs. Reads only; prints no secret."""
+    marks = ('"isLiveNow":true', '"isLiveNow":false', '"isLive":true', '"isUpcoming":true', '"isLiveContent":true',
+             '"liveBroadcastDetails"', "ytInitialPlayerResponse", "consent.youtube.com", "Sign in to confirm")
+    lines = []
+
+    def describe(name: str, url: str) -> None:
+        try:
+            page = _get_page(url, timeout=timeout, user_agent=user_agent, what=name)
+        except LiveCheckError as exc:
+            lines.append(f"{name}: {exc}")
+            return
+        status = re.search(r'"playabilityStatus":\{"status":"([A-Z_]+)"', page)
+        canonical = _CANONICAL.search(page)
+        kind = "none" if canonical is None else ("watch page" if canonical.group(2) else "channel page")
+        lines.append(f"{name}: {len(page)} chars, canonical={kind}, playability={status.group(1) if status else 'none'}, "
+                     f"marks={[m for m in marks if m in page]}")
+
+    describe("live page", LIVE_PAGE.format(channel_id=channel_id))
+    try:
+        candidates = recent_stream_ids(channel_id, timeout=timeout, user_agent=user_agent)
+    except social.VideoFeedError as exc:
+        lines.append(f"feed: {exc}")
+        candidates = []
+    lines.append(f"feed: {len(candidates)} candidate video(s)")
+    for index, video_id in enumerate(candidates, 1):
+        describe(f"video page {index}", WATCH_PAGE.format(video_id=video_id))
+    return lines
+
+
+if __name__ == "__main__":
+    _settings = Settings.from_env()
+    for _line in diagnose(_settings.youtube_channel_id or "", timeout=_settings.request_timeout_seconds, user_agent=_settings.user_agent):
+        print(_line)

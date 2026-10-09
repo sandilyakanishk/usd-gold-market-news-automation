@@ -23,6 +23,11 @@ name: Live check (alerts Telegram when the YouTube channel goes live)
 
 on:
   workflow_dispatch:
+    inputs:
+      diagnose:
+        description: "Also print what YouTube's pages look like from here (reads only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -63,3 +68,9 @@ jobs:
           YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
           INSTAGRAM_PROFILE_URL: ${{ vars.INSTAGRAM_PROFILE_URL }}
         run: python -m src.main --telegram-send-live
+
+      - name: Describe YouTube's pages as seen from here
+        if: ${{ inputs.diagnose }}
+        env:
+          YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
+        run: python -m src.live
