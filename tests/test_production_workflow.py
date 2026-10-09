@@ -14,7 +14,7 @@ from src.runplan import RunPlan, plan
 
 from .test_cloud_runner import SAFE_TEST, SECRET_NAMES, WORKFLOWS, code_lines, workflow_text
 
-PRODUCTION_SECRETS = SECRET_NAMES | {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GEMINI_API_KEY"}
+PRODUCTION_SECRETS = SECRET_NAMES | {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GEMINI_API_KEY", "YOUTUBE_API_KEY"}
 TELEGRAM_GUARD = ("!cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' "
                   "&& steps.collect.outcome == 'success' && steps.telegram.outcome == 'success'")
 
