@@ -208,7 +208,7 @@ def test_with_a_key_the_api_is_used_and_the_page_is_not_read(db):
 
 # -- the second look: the channel's newest videos ----------------------------------------
 
-def watch(*markers, title="WealthwithSG LIVE FOREX TRADING"):
+def watch(*markers, title="Example LIVE FOREX TRADING"):
     return f'<html><head><meta name="title" content="{title}"></head><script>' + ",".join(markers) + "</script></html>"
 
 
@@ -221,7 +221,7 @@ ORDINARY = watch('"playabilityStatus":{"status":"OK"}')
 
 
 def test_a_video_page_tells_on_air_from_waiting_from_ended():
-    assert live.parse_watch_page(STREAMING, "LiveNow1234").title == "WealthwithSG LIVE FOREX TRADING"
+    assert live.parse_watch_page(STREAMING, "LiveNow1234").title == "Example LIVE FOREX TRADING"
     assert live.parse_watch_page(STREAMING_OLD_MARKUP, "LiveNow1234") is not None
     # Exactly what the real page said while the stream was set up but had not started.
     assert live.parse_watch_page(WAITING, "LiveNow1234") is None
