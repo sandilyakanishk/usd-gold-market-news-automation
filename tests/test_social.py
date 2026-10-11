@@ -467,8 +467,10 @@ def _cli_env(monkeypatch, tmp_path, channel=CHANNEL):
 
 
 def test_cli_dry_run_shows_the_post(monkeypatch, tmp_path, capsys):
+    from datetime import timedelta
     from src import main as cli
     _cli_env(monkeypatch, tmp_path)
+    monkeypatch.setattr(social, "FORWARD_MAX_AGE", timedelta(days=100000))   # the sample video's date is fixed; today's is not
     monkeypatch.setattr(social.send_new_videos, "__kwdefaults__",
                         {**social.send_new_videos.__kwdefaults__, "fetch": fetcher(feed(NEW_SHORT, OLD_SHORT))})
     assert cli.main(["--telegram-send-videos", "--dry-run"]) == 0

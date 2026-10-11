@@ -7,6 +7,7 @@ card is due at that moment and has not been posted yet. Times are in the
 display timezone (India time):
 
     08:30            key levels of the day     (Monday to Friday)
+    09:00            USD news, week ahead      (Saturday and Sunday)
     09:00 ... 23:00  market pulse, every 2 h   (Monday to Friday)
     10:00 ... 22:00  trader's corner, every 2 h, one hour after each pulse
     11:30            what's moving gold        (Monday to Friday)
@@ -43,6 +44,10 @@ log = logging.getLogger(__name__)
 SYMBOL = pulse.SYMBOL
 PULSE, CORNER, KEY_LEVELS, DRIVERS, LEARN, RECAP = "MARKET_PULSE", "TRADER_CORNER", "KEY_LEVELS", "GOLD_DRIVERS", "LEARN_CARD", "DAILY_RECAP"
 COUNTDOWN = "NEWS_COUNTDOWN"
+WEEK_AHEAD = "WEEK_AHEAD"
+# The weekend has no releases of its own, so the news post is the coming week's calendar.
+WEEKEND_SLOTS = ((WEEK_AHEAD, time(9, 0)),)
+WEEK_AHEAD_DAYS = 7
 # A countdown goes out when a high-impact USD release is this many minutes away.
 COUNTDOWN_FROM, COUNTDOWN_UNTIL = 35, 5
 # The official daily US figures shown on the "what's moving gold" card: (FRED series, label, unit, decimals).
@@ -104,6 +109,7 @@ def slots_for(day: date, tz: ZoneInfo | timezone) -> list[Slot]:
     slots += [Slot(kind, at(moment)) for kind, moment in FIXED_SLOTS]
     if day.weekday() >= 5:  # Saturday, Sunday
         slots = [s for s in slots if s.kind not in MARKET_DAY_ONLY]
+        slots += [Slot(kind, at(moment)) for kind, moment in WEEKEND_SLOTS]
     return sorted(slots, key=lambda s: s.start)
 
 
@@ -219,6 +225,47 @@ def build_recap(today: date, summary: dict) -> str:
     ])
 
 
+def week_ahead_events(db: EventRepository, today: date) -> list:
+    """High and medium-impact USD events of the coming days, in time order."""
+    events = db.query_events(currency="USD", impacts=["High", "Medium"],
+                             date_from=(today + timedelta(days=1)).isoformat(),
+                             date_to=(today + timedelta(days=WEEK_AHEAD_DAYS)).isoformat())
+    # High impact first within a moment, then by name: the same order on every database.
+    return sorted((e for e in events if e.date), key=lambda e: (e.date, e.time or "", e.impact != "High", e.event_name.lower()))
+
+
+def build_week_ahead(today: date, events: list, *, zone: str = "IST") -> str:
+    """The coming week's USD calendar, grouped by day. Forex Factory's own times, names and figures."""
+    def line(event) -> str:
+        clock = "All day"
+        if event.time:
+            hour, minute = (int(part) for part in event.time.split(":")[:2])
+            clock = f"{hour % 12 or 12}:{minute:02d} {'AM' if hour < 12 else 'PM'}"
+        figures = " · ".join(f"{label} {value}" for label, value in (("F:", event.forecast), ("P:", event.previous)) if value)
+        return f"{'🔴' if event.impact == 'High' else '🟠'} {clock}  {event.event_name}" + (f"  ({figures})" if figures else "")
+
+    def render(chosen: list) -> str:
+        days: dict[str, list] = {}
+        for event in chosen:
+            days.setdefault(event.date, []).append(event)
+        first, last = date.fromisoformat(min(days)), date.fromisoformat(max(days))
+        span = f"{first.day} {first.strftime('%b')} to {last.day} {last.strftime('%b')}"
+        lines = ["📅 *USD NEWS · WEEK AHEAD*", span, ""]
+        for day in sorted(days):
+            lines.append(f"*{pulse._day(datetime.combine(date.fromisoformat(day), time(0)))}*")
+            lines += [line(event) for event in days[day]]
+            lines.append("")
+        high = sum(1 for e in chosen if e.impact == "High")
+        lines += [f"🔴 High impact: {high}   🟠 Medium impact: {len(chosen) - high}",
+                  f"Times in {zone} · F: forecast · P: previous", "Source: Forex Factory"]
+        return "\n".join(lines)
+
+    text = render(events)
+    if len(text) > 3900:  # a very full week: the high-impact releases are the ones that must fit
+        text = render([e for e in events if e.impact == "High"] or events[:25])
+    return text
+
+
 def build_countdown(event, instant: datetime, now: datetime, tz: ZoneInfo | timezone) -> str:
     minutes = max(1, round((instant - now).total_seconds() / 60))
     when = instant.astimezone(tz)
@@ -327,6 +374,15 @@ def _drivers_card(db, client, settings, chat_id, slot, *, now, tz, dry_run, prov
     return _post(db, client, chat_id, slot, build_drivers(today, readings), dry_run=dry_run, now=now)
 
 
+def _week_ahead_card(db, client, chat_id, slot, *, now, tz, dry_run) -> CardResult:
+    today = now.astimezone(tz).date()
+    events = week_ahead_events(db, today)
+    if not events:
+        return CardResult(WEEK_AHEAD, OUTCOME_NOT_READY, slot.message_key, detail="next week's calendar is not published yet")
+    zone = now.astimezone(tz).strftime("%Z") or "UTC"
+    return _post(db, client, chat_id, slot, build_week_ahead(today, events, zone=zone), dry_run=dry_run, now=now)
+
+
 def _countdowns(db, client, chat_id, *, now, tz, dry_run) -> list[CardResult]:
     """One reminder per high-impact USD release that is about half an hour away."""
     results = []
@@ -395,6 +451,8 @@ def send_scheduled(db: EventRepository, client: TelegramClient | None, settings:
             results.append(_key_levels_card(db, client, chat_id, slot, now=now, tz=tz, dry_run=dry_run))
         elif slot.kind == RECAP:
             results.append(_recap_card(db, client, chat_id, slot, now=now, tz=tz, dry_run=dry_run))
+        elif slot.kind == WEEK_AHEAD:
+            results.append(_week_ahead_card(db, client, chat_id, slot, now=now, tz=tz, dry_run=dry_run))
         elif slot.kind == DRIVERS:
             results.append(_drivers_card(db, client, settings, chat_id, slot, now=now, tz=tz, dry_run=dry_run,
                                          provider=drivers_provider))
@@ -406,7 +464,7 @@ def send_scheduled(db: EventRepository, client: TelegramClient | None, settings:
 
 
 __all__ = [
-    "CORNER", "COUNTDOWN", "CardResult", "DRIVERS", "build_countdown", "build_drivers", "read_drivers", "GRACE", "KEY_LEVELS", "LEARN", "OUTCOME_ALREADY_SENT", "OUTCOME_DRY_RUN",
+    "CORNER", "COUNTDOWN", "CardResult", "DRIVERS", "WEEK_AHEAD", "build_week_ahead", "week_ahead_events", "build_countdown", "build_drivers", "read_drivers", "GRACE", "KEY_LEVELS", "LEARN", "OUTCOME_ALREADY_SENT", "OUTCOME_DRY_RUN",
     "OUTCOME_FAILED", "OUTCOME_NOT_READY", "OUTCOME_SENT", "PULSE", "RECAP", "Slot", "build_key_levels", "build_recap",
     "day_bounds", "due_slots", "pivot_levels", "record_price", "roll_prices", "sample_slot", "send_scheduled",
     "slots_for", "summarize",

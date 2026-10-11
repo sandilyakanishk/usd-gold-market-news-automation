@@ -83,7 +83,9 @@ def test_a_weekday_has_one_post_an_hour_with_pulse_and_corner_alternating():
 def test_the_weekend_keeps_only_the_cards_that_do_not_need_a_market():
     for day in (SATURDAY, date(2026, 10, 11)):
         kinds = {s.kind for s in cards.slots_for(day, IST)}
-        assert kinds == {cards.CORNER, cards.LEARN}
+        assert kinds == {cards.CORNER, cards.LEARN, cards.WEEK_AHEAD}
+        assert [x.start.strftime("%H:%M") for x in cards.slots_for(day, IST) if x.kind == cards.WEEK_AHEAD] == ["09:00"]
+    assert cards.WEEK_AHEAD not in {s.kind for s in cards.slots_for(THURSDAY, IST)}
     assert cards.PULSE in {s.kind for s in cards.slots_for(MONDAY, IST)}
 
 
@@ -257,6 +259,89 @@ def test_recap_uses_todays_recorded_prices_only(db):
 def test_recap_waits_when_too_little_was_recorded(db):
     client = FakeTelegram()
     assert run(db, client, ist(THURSDAY, 23, 55))[0].outcome == cards.OUTCOME_NOT_READY and client.sent == []
+
+
+# -- weekend news: the week ahead ----------------------------------------------------------
+
+def news_event(name, day, hhmm, impact="High", currency="USD", forecast=None, previous=None):
+    from src.collector.models import Event
+    hour, minute = (int(x) for x in hhmm.split(":"))
+    utc = ist(day, hour, minute).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    stamp = "2026-10-10T00:00:00Z"
+    import hashlib
+    return Event(event_id="ff-" + hashlib.sha1(f"{name}|{day}|{hhmm}".encode()).hexdigest()[:16], date=day.isoformat(), time=hhmm,
+                 timezone="Asia/Kolkata", datetime_utc=utc, currency=currency, event_name=name, impact=impact,
+                 original_impact=impact, gold_relevance=True, forecast=forecast, previous=previous, actual=None,
+                 source="forexfactory", source_url="https://example.test/feed", retrieved_at=stamp, updated_at=stamp)
+
+
+SUNDAY = date(2026, 10, 11)
+NEXT_WEEK = [
+    news_event("Empire State Manufacturing Index", date(2026, 10, 12), "18:00", impact="Low"),
+    news_event("CPI m/m", date(2026, 10, 14), "18:00", forecast="0.3%", previous="0.4%"),
+    news_event("Core CPI m/m", date(2026, 10, 14), "18:00", forecast="0.3%"),
+    news_event("Retail Sales m/m", date(2026, 10, 15), "18:00", previous="0.6%"),
+    news_event("Unemployment Claims", date(2026, 10, 15), "18:00", impact="Medium", forecast="205K", previous="197K"),
+    news_event("Fed Chairman Speaks", date(2026, 10, 16), "23:30"),
+    news_event("ECB President Speaks", date(2026, 10, 14), "13:00", currency="EUR"),
+    news_event("Last Week Event", date(2026, 10, 9), "19:30"),
+    news_event("Far Future Event", date(2026, 10, 20), "18:00"),
+]
+
+
+def test_week_ahead_text(db):
+    db.upsert_events(NEXT_WEEK)
+    events = cards.week_ahead_events(db, SUNDAY)
+    assert [e.event_name for e in events] == ["Core CPI m/m", "CPI m/m", "Retail Sales m/m", "Unemployment Claims", "Fed Chairman Speaks"]
+    assert cards.build_week_ahead(SUNDAY, events) == "\n".join([
+        "📅 *USD NEWS · WEEK AHEAD*",
+        "14 Oct to 16 Oct",
+        "",
+        "*Wed, 14 Oct*",
+        "🔴 6:00 PM  Core CPI m/m  (F: 0.3%)",
+        "🔴 6:00 PM  CPI m/m  (F: 0.3% · P: 0.4%)",
+        "",
+        "*Thu, 15 Oct*",
+        "🔴 6:00 PM  Retail Sales m/m  (P: 0.6%)",
+        "🟠 6:00 PM  Unemployment Claims  (F: 205K · P: 197K)",
+        "",
+        "*Fri, 16 Oct*",
+        "🔴 11:30 PM  Fed Chairman Speaks",
+        "",
+        "🔴 High impact: 4   🟠 Medium impact: 1",
+        "Times in IST · F: forecast · P: previous",
+        "Source: Forex Factory",
+    ])
+
+
+def test_the_weekend_news_post_goes_out_once_each_weekend_morning(db):
+    db.upsert_events(NEXT_WEEK)
+    client, sent = FakeTelegram(), []
+    for day in (SATURDAY, SUNDAY, MONDAY):
+        for hour, minute in ((8, 55), (9, 5), (9, 15), (12, 0)):
+            for result in run(db, client, ist(day, hour, minute)):
+                if result.kind == cards.WEEK_AHEAD and result.outcome == cards.OUTCOME_SENT:
+                    sent.append((day.strftime("%a"), f"{hour:02d}:{minute:02d}"))
+    assert sent == [("Sat", "09:05"), ("Sun", "09:05")]
+    week_posts = [t for t in client.sent if "WEEK AHEAD" in t]
+    assert len(week_posts) == 2 and "Last Week Event" not in week_posts[1] and "ECB President" not in week_posts[1]
+    assert "Empire State" not in week_posts[1]                         # low-impact events are left out
+
+
+def test_no_weekend_news_post_until_next_weeks_calendar_exists(db):
+    db.upsert_events([news_event("Last Week Event", date(2026, 10, 9), "19:30")])
+    client = FakeTelegram()
+    results = [r for r in run(db, client, ist(SATURDAY, 9, 5)) if r.kind == cards.WEEK_AHEAD]
+    assert [r.outcome for r in results] == [cards.OUTCOME_NOT_READY] and client.sent == []
+
+
+def test_a_very_full_week_still_fits_in_one_message(db):
+    crowded = [news_event(f"Medium Impact Release Number {i} With A Long Name", date(2026, 10, 12 + i % 5), "18:00", impact="Medium",
+                          forecast="1.0%", previous="0.9%") for i in range(70)]
+    crowded += [news_event(f"Key Release {i}", date(2026, 10, 13), "18:00") for i in range(5)]
+    db.upsert_events(crowded)
+    text = cards.build_week_ahead(SUNDAY, cards.week_ahead_events(db, SUNDAY))
+    assert len(text) <= 4096 and text.count("🔴 6:00 PM") == 5 and "Medium Impact Release" not in text
 
 
 # -- pulse on the timetable ----------------------------------------------------------------

@@ -921,12 +921,19 @@ records the gold price, then posts whichever card is due (India time):
 |---|---|---|
 | 08:30 | Key levels of the day | Monday to Friday |
 | 09:00, 11:00 ... 23:00 | Market pulse | Monday to Friday |
+| 09:00 | USD news: week ahead | Saturday and Sunday |
 | 10:00, 12:00 ... 22:00 | Trader's corner (quiz, rule, fact, myth in turn) | every day |
 | 11:30 | What's moving gold | Monday to Friday |
 | 15:30 | Learn card | every day |
 | 23:30 | Daily recap | Monday to Friday |
 
 - Nothing is scheduled between midnight and 08:30.
+- **Weekends.** The market cards (pulse, key levels, what's moving gold,
+  recap) pause; the news does not. The daily brief, alerts, results and
+  reminders run every day as usual, and because a weekend rarely has a
+  release of its own, a **week ahead** post lists the coming week's high and
+  medium-impact USD events by day, as soon as Forex Factory has published
+  that week. Trader's corner and the learn card also continue.
 - A card's slot is its message identity (`MARKET_PULSE_2026-10-08_0900`), so
   each is posted once. A late run still posts a card up to 50 minutes after
   its time; after that the slot is skipped.
