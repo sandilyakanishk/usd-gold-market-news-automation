@@ -84,6 +84,9 @@ class MessageTemplates:
         selection = config["selection"]
         self.daily_minimum_priority = self._priority(selection["daily_minimum_priority"], "daily_minimum_priority")
         self.daily_require_gold = bool(selection.get("daily_require_gold_relevance", True))
+        # A weekend has so little on the calendar that even its minor events are worth listing.
+        self.weekend_daily_minimum_priority = self._priority(
+            selection.get("weekend_daily_minimum_priority", selection["daily_minimum_priority"]), "weekend_daily_minimum_priority")
         self.alert_requires_highlight = bool(selection.get("alert_requires_highlight", True))
         self.alert_only_before_release = bool(selection.get("alert_only_before_release", True))
         self.upcoming_minimum_priority = self._priority(selection["upcoming_minimum_priority"], "upcoming_minimum_priority")

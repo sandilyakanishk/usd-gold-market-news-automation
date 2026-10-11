@@ -160,12 +160,13 @@ class ContentBuilder:
     def morning_update(self, items: list[EnrichedEvent], day: date) -> Message:
         """One overview message for `day` (a date in the display timezone)."""
         t = self.templates
+        minimum = t.weekend_daily_minimum_priority if day.weekday() >= 5 else t.daily_minimum_priority
         chosen = []
         for item in items:
             local, c = self.local_time(item), item.classification
             if not local or local.date() != day or c is None:
                 continue
-            if not _at_least(c.priority, t.daily_minimum_priority):
+            if not _at_least(c.priority, minimum):
                 continue
             if t.daily_require_gold and not c.gold_relevance:
                 continue

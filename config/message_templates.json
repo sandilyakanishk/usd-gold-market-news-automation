@@ -24,6 +24,7 @@
   "selection": {
     "_about": "Which events each message type covers, and in what order. Priorities and Gold relevance come from the Step 2 classification.",
     "daily_minimum_priority": "MEDIUM",
+    "weekend_daily_minimum_priority": "LOW",
     "daily_require_gold_relevance": true,
     "daily_order": "priority",
     "alert_requires_highlight": true,

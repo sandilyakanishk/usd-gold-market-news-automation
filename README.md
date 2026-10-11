@@ -581,6 +581,7 @@ Selection uses the Step 2 classification (`priority`, `gold_relevance`,
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `daily_minimum_priority` | `MEDIUM` | lowest priority shown in the daily update (so `LOW` is left out) |
+| `weekend_daily_minimum_priority` | `LOW` | the same for a Saturday or Sunday: a weekend has so few events that its minor ones are listed too, so the news does not go silent |
 | `daily_require_gold_relevance` | `true` | daily update only lists Gold-relevant events |
 | `daily_order` | `priority` | order of events in the daily update: highest priority first, then strongest Gold relevance, then time. `time` gives plain chronological order. Each event still shows its own time; stored data is not reordered. |
 | `alert_requires_highlight` | `true` | alerts only for `highlight_required` events |
