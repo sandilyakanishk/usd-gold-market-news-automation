@@ -35,7 +35,12 @@ MIRRORED_TYPES = ("MARKET_PULSE", "TRADER_CORNER", "LEARN_CARD", "KEY_LEVELS", "
                   "WEEK_AHEAD", "NEWS_COUNTDOWN", "VIDEO_POST", "LIVE_ALERT")
 
 
-def whatsapp_mirror(settings: Settings, *, environ=None, make_client=build_whapi_client):
+def _download_cover(url: str) -> bytes | None:
+    from ..social import download_image
+    return download_image(url)
+
+
+def whatsapp_mirror(settings: Settings, *, environ=None, make_client=build_whapi_client, download=_download_cover):
     """A function (db, message_key, message_type, text, now) -> DeliveryResult | None, or None when switched off."""
     env = os.environ if environ is None else environ
     if str(env.get("WHATSAPP_MIRROR", "")).strip().lower() != "true":
@@ -48,12 +53,33 @@ def whatsapp_mirror(settings: Settings, *, environ=None, make_client=build_whapi
         return None
     destination = "whatsapp_channel" if is_channel(chat_id) else "whatsapp_community_announcement"
 
-    def copy(db: EventRepository, message_key: str, message_type: str, text: str, now: datetime) -> DeliveryResult | None:
+    def copy(db: EventRepository, message_key: str, message_type: str, text: str, now: datetime,
+             images: list[str] | None = None) -> DeliveryResult | None:
         if message_type not in MIRRORED_TYPES:
             return None
-        return deliver_text(db, client, message_key=message_key, message_type=message_type, text=text, chat_id=chat_id,
-                            now=now, provider=PROVIDER_WHAPI, destination=destination)
+        return deliver_text(db, _WhatsAppPost(client, images or [], download), message_key=message_key,
+                            message_type=message_type, text=text, chat_id=chat_id, now=now, provider=PROVIDER_WHAPI,
+                            destination=destination)
     return copy
+
+
+class _WhatsAppPost:
+    """Sends a copy with its cover image when one can be had, otherwise as plain text without a link preview."""
+
+    def __init__(self, client, images: list[str], download):
+        self._client, self._images, self._download = client, images, download
+
+    def send_text(self, chat_id: str, text: str, **_: object) -> str:
+        for url in self._images:
+            image = self._download(url)
+            if image is None:
+                continue
+            try:
+                return self._client.send_image(chat_id, image, text)
+            except DeliveryError as exc:
+                log.warning("WhatsApp did not take the cover image (%s); sending the text alone.", exc)
+                break
+        return self._client.send_text(chat_id, text, link_preview=False)
 
 
 def describe(result: DeliveryResult | None) -> str | None:

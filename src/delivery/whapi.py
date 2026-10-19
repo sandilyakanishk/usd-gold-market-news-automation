@@ -6,6 +6,7 @@ or edits a message.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import urllib.error
@@ -150,15 +151,21 @@ class WhapiClient:
         role = data.get("role")
         return str(role) if role else None
 
-    def send_text(self, chat_id: str, text: str) -> str:
-        """Send `text` exactly as given. Returns Whapi's message id."""
+    def send_image(self, chat_id: str, image: bytes, caption: str) -> str:
+        """Post a JPEG with `caption` under it. Returns Whapi's message id."""
         if not chat_id or not str(chat_id).strip():
             raise WhapiConfigError("WHATSAPP_ANNOUNCEMENT_CHAT_ID is not set. Add it to the environment or to .env.")
-        if not isinstance(text, str) or not text.strip():
+        if not isinstance(image, (bytes, bytearray)) or not image:
+            raise WhapiMessageError("There is no image to send.")
+        if not isinstance(caption, str) or not caption.strip():
             raise WhapiMessageError("The message has no text.")
-        if len(text) > MAX_TEXT_LENGTH:
-            raise WhapiMessageError(f"The message is {len(text)} characters long; the limit is {MAX_TEXT_LENGTH}.")
-        data = self._request("POST", "/messages/text", {"to": chat_id, "body": text})
+        if len(caption) > MAX_TEXT_LENGTH:
+            raise WhapiMessageError(f"The caption is {len(caption)} characters long; the limit is {MAX_TEXT_LENGTH}.")
+        media = "data:image/jpeg;base64," + base64.b64encode(bytes(image)).decode("ascii")
+        data = self._request("POST", "/messages/image", {"to": chat_id, "media": media, "caption": caption})
+        return self._message_id(data, chat_id)
+
+    def _message_id(self, data: dict, chat_id: str) -> str:
         message = data.get("message")
         message_id = message.get("id") if isinstance(message, dict) else None
         if data.get("sent") is False or not message_id:
@@ -166,3 +173,20 @@ class WhapiClient:
             raise WhapiError(self._clean(f"Whapi did not confirm the message: {detail}"))
         log.info("Whapi: message accepted for %s (id %s)", mask_chat_id(chat_id), message_id)
         return str(message_id)
+
+    def send_text(self, chat_id: str, text: str, *, link_preview: bool = True) -> str:
+        """Send `text` exactly as given. Returns Whapi's message id.
+
+        With link_preview=False no preview card is attached to a link: Whapi's
+        own server builds that card, and YouTube shows it a cookie page.
+        """
+        if not chat_id or not str(chat_id).strip():
+            raise WhapiConfigError("WHATSAPP_ANNOUNCEMENT_CHAT_ID is not set. Add it to the environment or to .env.")
+        if not isinstance(text, str) or not text.strip():
+            raise WhapiMessageError("The message has no text.")
+        if len(text) > MAX_TEXT_LENGTH:
+            raise WhapiMessageError(f"The message is {len(text)} characters long; the limit is {MAX_TEXT_LENGTH}.")
+        payload = {"to": chat_id, "body": text}
+        if not link_preview:
+            payload["no_link_preview"] = True
+        return self._message_id(self._request("POST", "/messages/text", payload), chat_id)

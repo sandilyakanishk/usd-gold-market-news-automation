@@ -14,14 +14,21 @@ SETTINGS = SimpleNamespace(whatsapp_announcement_chat_id="120363000000005555@new
 
 
 class FakeWhapi:
-    def __init__(self, fail=False):
-        self.sent, self.fail = [], fail
+    def __init__(self, fail=False, image_fails=False):
+        self.sent, self.images, self.fail, self.image_fails, self.previews = [], [], fail, image_fails, []
 
-    def send_text(self, chat_id, text):
+    def send_text(self, chat_id, text, *, link_preview=True):
         if self.fail:
             raise DeliveryError("Whapi answered HTTP 503.")
         self.sent.append((chat_id, text))
+        self.previews.append(link_preview)
         return f"wamid-{len(self.sent)}"
+
+    def send_image(self, chat_id, image, caption):
+        if self.image_fails:
+            raise DeliveryError("Whapi answered HTTP 400.")
+        self.images.append((chat_id, image, caption))
+        return f"wamid-img-{len(self.images)}"
 
 
 @pytest.fixture
@@ -43,7 +50,7 @@ def test_without_a_destination_copies_stay_off():
 
 def test_every_telegram_card_is_copied_once_and_news_is_left_to_its_own_steps(db):
     fake = FakeWhapi()
-    copy = mirror.whatsapp_mirror(SETTINGS, environ={"WHATSAPP_MIRROR": "true"}, make_client=lambda s: fake)
+    copy = mirror.whatsapp_mirror(SETTINGS, environ={"WHATSAPP_MIRROR": "true"}, make_client=lambda s: fake, download=lambda u: None)
     for kind in mirror.MIRRORED_TYPES:
         assert copy(db, f"{kind}_1", kind, f"text of {kind}", NOW).outcome == "SENT"
         assert copy(db, f"{kind}_1", kind, f"text of {kind}", NOW).outcome == "ALREADY_SENT"
@@ -83,3 +90,37 @@ def test_a_quiz_goes_to_whatsapp_as_text_with_the_answer_underneath():
     assert text.startswith("❓ *QUIZ TIME*\n\nWhat does XAU stand for?\n\nA) ")
     assert f"✅ *Answer: {'ABCD'[correct]}) Gold*" in text and text.endswith("XAU is the code for gold.")
     assert text.index("Answer") > text.index("D) ")                  # the answer comes after all the options
+
+
+def test_reels_videos_and_live_alerts_go_with_their_cover_and_text_never_with_a_link_preview(db):
+    """On 19 October Whapi's own link preview of a live stream showed YouTube's cookie page in Finnish."""
+    fake = FakeWhapi()
+    covers = {"https://i.ytimg.com/vi/x/maxresdefault_live.jpg": None, "https://i.ytimg.com/vi/x/maxresdefault.jpg": b"\xff\xd8jpeg"}
+    copy = mirror.whatsapp_mirror(SETTINGS, environ={"WHATSAPP_MIRROR": "true"}, make_client=lambda s: fake, download=covers.get)
+    result = copy(db, "LIVE_YT_x", "LIVE_ALERT", "WE ARE LIVE NOW https://www.youtube.com/watch?v=x", NOW, list(covers))
+    assert result.outcome == "SENT" and result.provider_message_id == "wamid-img-1"
+    assert fake.images == [("120363000000005555@newsletter", b"\xff\xd8jpeg", "WE ARE LIVE NOW https://www.youtube.com/watch?v=x")]
+    # Without a cover, or when WhatsApp refuses it, the text goes alone and without a preview card.
+    assert copy(db, "LIVE_YT_y", "LIVE_ALERT", "live text", NOW, ["https://i.ytimg.com/vi/y/a.jpg"]).outcome == "SENT"
+    refusing = FakeWhapi(image_fails=True)
+    copy2 = mirror.whatsapp_mirror(SETTINGS, environ={"WHATSAPP_MIRROR": "true"}, make_client=lambda s: refusing, download=lambda u: b"\xff\xd8x")
+    assert copy2(db, "VIDEO_YT_z", "VIDEO_POST", "reel text", NOW, ["https://i.ytimg.com/vi/z/oar2.jpg"]).outcome == "SENT"
+    assert fake.previews == [False] and refusing.previews == [False] and [t for _, t in refusing.sent] == ["reel text"]
+
+
+def test_send_image_uploads_the_picture_with_its_caption(monkeypatch):
+    import base64
+    from src.delivery.whapi import WhapiClient, WhapiMessageError
+    client, calls = WhapiClient("tok-TEST"), []
+    monkeypatch.setattr(client, "_request", lambda method, path, payload=None: calls.append((method, path, payload)) or {"sent": True, "message": {"id": "m1"}})
+    assert client.send_image("120363000000005555@newsletter", b"\xff\xd8abc", "caption") == "m1"
+    method, path, payload = calls[0]
+    assert (method, path) == ("POST", "/messages/image") and payload["caption"] == "caption"
+    assert payload["media"] == "data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8abc").decode()
+    client.send_text("120363000000005555@newsletter", "hello https://example.com", link_preview=False)
+    assert calls[1][2] == {"to": "120363000000005555@newsletter", "body": "hello https://example.com", "no_link_preview": True}
+    client.send_text("120363000000005555@newsletter", "plain news")
+    assert "no_link_preview" not in calls[2][2]
+    for bad in ((b"", "c"), (b"x", " ")):
+        with pytest.raises(WhapiMessageError):
+            client.send_image("120363000000005555@newsletter", *bad)

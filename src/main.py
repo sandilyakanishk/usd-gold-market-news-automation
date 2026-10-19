@@ -603,7 +603,7 @@ def run_telegram_videos(args: argparse.Namespace, settings: Settings, today: dat
                                              check_stream=live.stream_checker(settings))
             copy = None if args.dry_run else whatsapp_mirror(settings)
             now = datetime.now(timezone.utc)
-            copies = {video.message_key: copy(db, video.message_key, social.MESSAGE_TYPE, caption, now)
+            copies = {video.message_key: copy(db, video.message_key, social.MESSAGE_TYPE, caption, now, video.images)
                       for video, result, caption in results if copy and result.outcome == OUTCOME_SENT}
         except social.VideoFeedError as exc:
             logging.getLogger(__name__).warning("Video forwarding: %s", exc)
@@ -646,7 +646,7 @@ def run_telegram_live(args: argparse.Namespace, settings: Settings, today: date)
             results = live.send_live_alerts(db, client, settings, chat_id, dry_run=args.dry_run)
             copy = None if args.dry_run else whatsapp_mirror(settings)
             now = datetime.now(timezone.utc)
-            copies = {stream.message_key: copy(db, stream.message_key, live.MESSAGE_TYPE, text, now)
+            copies = {stream.message_key: copy(db, stream.message_key, live.MESSAGE_TYPE, text, now, stream.images)
                       for stream, result, text in results if copy and result.outcome == OUTCOME_SENT}
         except live.LiveCheckError as exc:
             logging.getLogger(__name__).warning("Live check: %s", exc)
