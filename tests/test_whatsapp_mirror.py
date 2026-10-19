@@ -124,3 +124,38 @@ def test_send_image_uploads_the_picture_with_its_caption(monkeypatch):
     for bad in ((b"", "c"), (b"x", " ")):
         with pytest.raises(WhapiMessageError):
             client.send_image("120363000000005555@newsletter", *bad)
+
+
+def test_a_copy_that_failed_is_sent_by_a_later_run(db):
+    from datetime import timedelta
+    down = FakeWhapi(fail=True)
+    first = mirror.whatsapp_mirror(SETTINGS, environ={"WHATSAPP_MIRROR": "true"}, make_client=lambda s: down, download=lambda u: None)
+    assert first(db, "MARKET_PULSE_2026-10-19_1700", "MARKET_PULSE", "pulse text", NOW).outcome == "FAILED"
+    back = FakeWhapi()
+    later = mirror.whatsapp_mirror(SETTINGS, environ={"WHATSAPP_MIRROR": "true"}, make_client=lambda s: back, download=lambda u: None)
+    retried = later.catch_up(db, NOW + timedelta(minutes=10))
+    assert [(k, r.outcome) for k, r in retried] == [("MARKET_PULSE_2026-10-19_1700", "SENT")]
+    assert back.sent == [("120363000000005555@newsletter", "pulse text")]
+    assert later.catch_up(db, NOW + timedelta(minutes=20)) == []                 # sent: never again
+
+
+def test_catch_up_gives_up_after_a_few_attempts_and_ignores_old_posts(db):
+    from datetime import timedelta
+    down = FakeWhapi(fail=True)
+    copy = mirror.whatsapp_mirror(SETTINGS, environ={"WHATSAPP_MIRROR": "true"}, make_client=lambda s: down, download=lambda u: None)
+    copy(db, "TRADER_CORNER_1", "TRADER_CORNER", "corner text", NOW)
+    for minutes in range(10, 100, 10):
+        copy.catch_up(db, NOW + timedelta(minutes=minutes))
+    assert db.get_delivery("TRADER_CORNER_1", "whapi", "120363000000005555@newsletter").attempts == mirror.MAX_ATTEMPTS
+    assert copy.catch_up(db, NOW + timedelta(hours=13)) == []                     # too old to send now
+
+
+def test_the_outbox_is_cleared_with_the_daily_clean_up(db):
+    from types import SimpleNamespace as NS
+    from zoneinfo import ZoneInfo
+    from src.pipeline import cleanup_old_deliveries
+    db.add_to_outbox("OLD_1", "MARKET_PULSE", "x", "[]", "2026-10-18T10:00:00Z")
+    db.add_to_outbox("NEW_1", "MARKET_PULSE", "y", "[]", "2026-10-19T04:00:00Z")
+    cleanup_old_deliveries(NS(display_timezone="Asia/Kolkata", calendar_retention_days=14),
+                           db, datetime(2026, 10, 19, 9, 0, tzinfo=ZoneInfo("Asia/Kolkata")))
+    assert [r["message_key"] for r in db.outbox_since("0000")] == ["NEW_1"]

@@ -139,3 +139,15 @@ CREATE TABLE IF NOT EXISTS content_state (
 );
 
 ALTER TABLE content_state ENABLE ROW LEVEL SECURITY;
+
+-- The text of each Telegram post that WhatsApp should also get, kept until
+-- WhatsApp has it, so a failed copy is retried. Cleared each morning.
+CREATE TABLE IF NOT EXISTS whatsapp_outbox (
+    message_key  TEXT PRIMARY KEY,
+    message_type TEXT NOT NULL,
+    text         TEXT NOT NULL,
+    images       TEXT NOT NULL DEFAULT '[]',
+    created_at   TEXT NOT NULL
+);
+
+ALTER TABLE whatsapp_outbox ENABLE ROW LEVEL SECURITY;

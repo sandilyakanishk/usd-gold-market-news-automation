@@ -100,6 +100,14 @@ CREATE TABLE IF NOT EXISTS daily_prices (
     PRIMARY KEY (symbol, day)
 );
 
+CREATE TABLE IF NOT EXISTS whatsapp_outbox (
+    message_key  TEXT PRIMARY KEY,
+    message_type TEXT NOT NULL,
+    text         TEXT NOT NULL,
+    images       TEXT NOT NULL DEFAULT '[]',
+    created_at   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS content_state (
     kind       TEXT PRIMARY KEY,
     position   INTEGER NOT NULL DEFAULT 0,

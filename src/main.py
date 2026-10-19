@@ -533,8 +533,11 @@ def run_telegram_scheduled(args: argparse.Namespace, settings: Settings, today: 
         copy = None if args.dry_run else whatsapp_mirror(settings)
         copies = {r.message_key: copy(db, r.message_key, r.kind, r.text, now)
                   for r in results if copy and r.outcome == OUTCOME_SENT and r.text and r.message_key}
+        retried = copy.catch_up(db, now) if copy else []
     if args.dry_run:
         print("DRY RUN: nothing is sent and nothing is recorded.\n")
+    for key, outcome in retried:
+        print(f"{key}: WhatsApp catch-up: {describe_copy(outcome)}")
     if not results:
         print("No card is due right now.")
         return 0

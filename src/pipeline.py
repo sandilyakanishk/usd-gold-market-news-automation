@@ -150,5 +150,6 @@ def cleanup_old_deliveries(settings: Settings, db: EventRepository, now: datetim
     stamp = "%Y-%m-%dT%H:%M:%SZ"
     removed = db.cleanup_old_deliveries(today.strftime(stamp), except_types=TWO_DAY_TYPES)
     removed += db.cleanup_old_deliveries((today - timedelta(days=1)).strftime(stamp))
+    db.delete_outbox_before(today.strftime(stamp))
     log.info("Daily cleanup: removed %d delivery record(s) made before today", removed)
     return removed

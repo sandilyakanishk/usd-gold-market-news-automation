@@ -76,6 +76,7 @@ PRICE_COLUMNS = ("symbol", "slot", "price", "source", "source_updated_at", "reco
 DAILY_PRICES_TABLE = "daily_prices"
 DAILY_PRICE_COLUMNS = ("symbol", "day", "open", "high", "low", "close", "samples")
 CONTENT_STATE_TABLE = "content_state"
+OUTBOX_TABLE = "whatsapp_outbox"
 _C_SELECT = f"SELECT {', '.join(CLASSIFICATION_COLUMNS)} FROM {CLASSIFICATION_TABLE}"
 _C_UPSERT = (
     f"INSERT INTO {CLASSIFICATION_TABLE} ({', '.join(CLASSIFICATION_COLUMNS)}) "
@@ -507,6 +508,25 @@ class EventRepository(ABC):
                 f"INSERT INTO {CONTENT_STATE_TABLE} (kind, position, recent, updated_at) VALUES (?, ?, ?, ?) "
                 "ON CONFLICT (kind) DO UPDATE SET position = excluded.position, recent = excluded.recent, "
                 "updated_at = excluded.updated_at", (kind, int(position), recent, updated_at))
+
+    # -- WhatsApp outbox ---------------------------------------------------------
+    # The text (and cover images) of each Telegram post that WhatsApp should also get, kept until it has.
+
+    def add_to_outbox(self, message_key: str, message_type: str, text: str, images: str, created_at: str) -> None:
+        with self._transaction():
+            self._write(
+                f"INSERT INTO {OUTBOX_TABLE} (message_key, message_type, text, images, created_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT (message_key) DO NOTHING", (message_key, message_type, text, images, created_at))
+
+    def outbox_since(self, created_after: str) -> list[dict]:
+        rows = self._read(
+            f"SELECT message_key, message_type, text, images, created_at FROM {OUTBOX_TABLE} WHERE created_at >= ? "
+            "ORDER BY created_at, message_key", (created_after,))
+        return [dict(r) for r in rows]
+
+    def delete_outbox_before(self, created_before: str) -> int:
+        with self._transaction():
+            return self._write(f"DELETE FROM {OUTBOX_TABLE} WHERE created_at < ?", (created_before,))
 
     def count_price_snapshots(self) -> int:
         return self._read(f"SELECT COUNT(*) AS n FROM {PRICES_TABLE}")[0]["n"]
