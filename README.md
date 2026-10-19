@@ -1118,6 +1118,23 @@ python -m src.main --telegram-send-live             # post it
 - **Cover.** The stream's cover is uploaded with the alert if YouTube has
   one at that moment; otherwise the alert goes out at once as a link post.
 
+## WhatsApp copies
+
+When `WHATSAPP_ENABLED` is on, every Telegram post is also sent once to the
+WhatsApp destination (`src/delivery/mirror.py`): the scheduled cards, the
+weekend week ahead, countdowns, reels, videos and live alerts. The news
+messages have WhatsApp steps of their own. The destination may be a WhatsApp
+Channel (an id ending in `@newsletter`) or a Community's Announcements group.
+
+Differences from Telegram: a quiz is sent as text with the answer
+underneath (a WhatsApp Channel has no quiz poll), and reels, videos and live
+alerts go as text with their link rather than with the cover image.
+
+Whapi's free plan allows about 1,000 requests a month. A month of copies is
+roughly 650 of them; the WhatsApp destination check runs only at the start of
+the morning window to leave room for them. If the allowance runs out, the
+WhatsApp copies stop until the next month; Telegram is unaffected.
+
 ## Cloud runner (Step 6)
 
 The project runs on GitHub Actions, so it does not need your computer. There

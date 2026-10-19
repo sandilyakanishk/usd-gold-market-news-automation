@@ -227,7 +227,7 @@ def test_a_failed_post_does_not_move_the_bookmark(db):
 
 def test_dry_run_shows_the_card_and_changes_nothing(db):
     result = post(db, None, settings(), slot(cards.CORNER, "quiz"), dry_run=True)
-    assert result.outcome == cards.OUTCOME_DRY_RUN and "✔" in result.text and "❓ Quiz:" in result.text
+    assert result.outcome == cards.OUTCOME_DRY_RUN and "✅ *Answer:" in result.text and "❓ *QUIZ TIME*" in result.text
     assert db.get_content_state("quiz") is None and db.count_deliveries() == 0
 
 

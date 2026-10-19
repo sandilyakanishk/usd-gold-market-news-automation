@@ -111,7 +111,7 @@ def test_both_workflows_share_one_concurrency_group_and_never_cancel():
     (at(16, 0), False, False, False),      # too late in the day for a "morning" brief
     (at(18, 15), False, False, False),     # polling: results only
     (at(21, 14), False, False, False),
-    (at(21, 15), False, True, True),       # evening window: tomorrow's reminders
+    (at(21, 15), False, True, False),      # evening window: tomorrow's reminders (the check ran this morning)
     (at(21, 45), False, True, False),
     (at(23, 59), False, True, False),
     (at(0, 15), False, False, False),      # past midnight: tomorrow has become today
@@ -366,9 +366,9 @@ def test_any_timer_cadence_covers_every_duty(minutes_apart, offset):
     assert len(morning) >= 15 and len(evening) >= 5
     assert _minutes_of(morning[0]) < 8 * 60 + 15 + minutes_apart       # the brief goes out within one interval of 08:15
     assert _minutes_of(evening[0]) < 21 * 60 + 15 + minutes_apart
-    # The destination check runs at least once and at most three times per window.
+    # The destination check runs once to three times a day, at the start of the morning window.
     checks = [m for m in moments if plan(m).check]
-    assert 2 <= len(checks) <= 6
+    assert 1 <= len(checks) <= 3 and all(plan(m).morning for m in checks)
 
 
 def _minutes_of(moment):
@@ -380,8 +380,8 @@ def test_a_ten_minute_timer_stays_inside_the_whapi_allowance():
     moments = timer(10)
     assert len(moments) == 144
     checks = sum(plan(m).check for m in moments)
-    assert checks == 6                                    # three per window
-    assert checks * 2 * 31 <= 400                         # two API requests each: well under 1,000 a month
+    assert checks == 3                                    # the first half hour of the morning window
+    assert checks * 2 * 31 <= 200                         # two API requests each, leaving ~800 a month for posts
 
 
 def test_the_calendar_download_is_cached_between_runs():

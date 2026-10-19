@@ -56,8 +56,8 @@ def plan(now: datetime, *, requested: str = "auto", manual: bool = False, displa
 
     if requested == "auto":
         morning, evening = in_morning, in_evening
-        first_slot = (in_morning and minute < _minutes(MORNING_START) + CHECK_MINUTES) or \
-                     (in_evening and minute < _minutes(EVENING_START) + CHECK_MINUTES)
+        # Once a day, at the start of the morning window: every check costs API requests.
+        first_slot = in_morning and minute < _minutes(MORNING_START) + CHECK_MINUTES
         check = manual or first_slot
     else:
         morning, evening, check = requested == "morning", requested == "evening", True

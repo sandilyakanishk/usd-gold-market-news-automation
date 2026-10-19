@@ -300,6 +300,16 @@ def arrange_quiz(item: dict) -> tuple[list[str], int]:
     return options, (item["answer"] - shift) % 4
 
 
+def quiz_as_text(item: dict) -> str:
+    """A quiz for a channel that has no quiz poll: lettered options, the answer underneath."""
+    options, correct = arrange_quiz(item)
+    letters = "ABCD"
+    lines = ["❓ *QUIZ TIME*", "", item["question"], ""]
+    lines += [f"{letters[i]}) {option}" for i, option in enumerate(options)]
+    lines += ["", "Think first, then scroll 👇", "", "", f"✅ *Answer: {letters[correct]}) {options[correct]}*", item["explanation"]]
+    return "\n".join(lines)
+
+
 class _QuizPost:
     def __init__(self, client: TelegramClient, item: dict):
         self._client, self._item = client, item
@@ -326,13 +336,13 @@ def send_content_card(db: EventRepository, client: TelegramClient | None, settin
         send_options=None if kind == "quiz" else {"markdown": True}, label=describe_chat(chat_id))
     if result.outcome == OUTCOME_SENT:
         save_state(db, kind, state, now)
-    shown = text if kind != "quiz" else text + "\n" + "\n".join(
-        f"  {'✔' if i == arrange_quiz(item)[1] else '•'} {o}" for i, o in enumerate(arrange_quiz(item)[0])) + f"\n  ({item['explanation']})"
+    # The card as text: what a dry run shows, and what a channel without quiz polls (WhatsApp) receives.
+    shown = text if kind != "quiz" else quiz_as_text(item)
     return cards.CardResult(slot.kind, result.outcome, slot.message_key, shown, result.provider_message_id,
                             result.error or f"{kind} from the {source}")
 
 
 __all__ = [
-    "ContentError", "KINDS", "TOPICS", "arrange_quiz", "ask_gemini", "build_prompt", "build_text", "headline",
+    "ContentError", "KINDS", "TOPICS", "arrange_quiz", "ask_gemini", "build_prompt", "build_text", "headline", "quiz_as_text",
     "load_library", "next_item", "save_state", "send_content_card", "topic_for", "validate",
 ]

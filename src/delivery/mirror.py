@@ -1,10 +1,16 @@
-"""WhatsApp copies of the low-volume Telegram posts.
+"""WhatsApp copies of the Telegram posts.
 
-After a week-ahead post, a news countdown, a new reel or video, or a live
-alert has gone out on Telegram, the same text is sent once to the WhatsApp
-destination as well. The hourly cards (market pulse, trader's corner and the
-rest) are not copied: Whapi's free plan allows about 1,000 requests a month,
-and they alone would use more than half of it.
+After a scheduled card (market pulse, trader's corner, learn card, key
+levels, what's moving gold, recap, week ahead), a news countdown, a new reel
+or video, or a live alert has gone out on Telegram, the same text is sent
+once to the WhatsApp destination as well. A quiz goes as text, with the
+answer underneath, because a WhatsApp Channel has no quiz poll. The news
+messages themselves (brief, alerts, results, reminders) have their own
+WhatsApp steps.
+
+Whapi's free plan allows about 1,000 requests a month. A month of these
+copies is roughly 650 of them, which is why the WhatsApp destination check
+runs only in the morning (see runplan).
 
 Switched on by WHATSAPP_MIRROR=true (in the cloud, the WHATSAPP_ENABLED
 repository variable). Each copy has its own delivery record (provider whapi),
@@ -25,7 +31,8 @@ from .whapi import is_channel
 
 log = logging.getLogger(__name__)
 
-MIRRORED_TYPES = ("WEEK_AHEAD", "NEWS_COUNTDOWN", "VIDEO_POST", "LIVE_ALERT")
+MIRRORED_TYPES = ("MARKET_PULSE", "TRADER_CORNER", "LEARN_CARD", "KEY_LEVELS", "GOLD_DRIVERS", "DAILY_RECAP",
+                  "WEEK_AHEAD", "NEWS_COUNTDOWN", "VIDEO_POST", "LIVE_ALERT")
 
 
 def whatsapp_mirror(settings: Settings, *, environ=None, make_client=build_whapi_client):
