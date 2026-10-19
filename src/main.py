@@ -34,7 +34,7 @@ from .delivery.service import (
 )
 from .delivery.telegram import describe_chat
 from . import cards, content_cards, live, pulse, social
-from .delivery.whapi import mask_chat_id
+from .delivery.whapi import is_channel, mask_chat_id
 from .filters.gold_usd_filters import USD
 from .pipeline import cleanup_old_events, sync
 
@@ -396,6 +396,16 @@ def run_whatsapp_check(settings: Settings) -> int:
     client.health()
     print("Whapi connection: OK (WhatsApp session authenticated)")
     chat_id = announcement_chat_id(settings)
+    if is_channel(chat_id):
+        print(f"WhatsApp Channel: {mask_chat_id(chat_id)}")
+        role = client.channel_role(chat_id)
+        if role not in ("owner", "admin"):
+            print(f"DESTINATION PROBLEM: this WhatsApp number is '{role or 'not a member'}' of the Channel; "
+                  "it must be its owner or an admin to post.", file=sys.stderr)
+            return 1
+        print(f"Channel confirmed: this number is its {role}.")
+        print("Nothing was sent.")
+        return 0
     print(f"Announcement group: {mask_chat_id(chat_id)}")
     if settings.whatsapp_community_id:
         actual = client.announcement_group_id(settings.whatsapp_community_id)
@@ -465,7 +475,8 @@ def run_whatsapp_send(args: argparse.Namespace, settings: Settings, today: date)
         args, settings, today, chat_id=chat_id, make_client=build_whapi_client, deliver=deliver_message,
         kinds=dict(morning=args.whatsapp_send_morning, alert=args.whatsapp_send_alert,
                    actuals=args.whatsapp_send_actuals, upcoming=args.whatsapp_send_upcoming),
-        destination_text=f"whatsapp_community_announcement ({mask_chat_id(chat_id)}) via whapi", id_label="Whapi message ID")
+        destination_text=f"{'whatsapp_channel' if is_channel(chat_id) else 'whatsapp_community_announcement'} "
+                         f"({mask_chat_id(chat_id)}) via whapi", id_label="Whapi message ID")
 
 
 def wants_telegram_send(args: argparse.Namespace) -> bool:

@@ -1,9 +1,8 @@
 # Production automation: collects the calendar, looks up released figures and
 # SENDS REAL MESSAGES to the Telegram channel when the repository variable
-# TELEGRAM_ENABLED is true, and to the WhatsApp Community's Announcements
-# group when WHATSAPP_ENABLED is true. WhatsApp is currently switched off:
-# the variable is not set, so every WhatsApp step is skipped. To switch it
-# back on:  gh variable set WHATSAPP_ENABLED --body true
+# TELEGRAM_ENABLED is true, and to WhatsApp (a WhatsApp Channel, or a
+# Community's Announcements group) when WHATSAPP_ENABLED is true. To switch
+# WhatsApp off:  gh variable delete WHATSAPP_ENABLED
 #
 # What starts it: an external timer (cron-job.org) calls GitHub's API every
 # 10 minutes, day and night, which starts this workflow with mode "auto".

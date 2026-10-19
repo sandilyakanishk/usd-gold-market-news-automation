@@ -59,6 +59,11 @@ def mask_chat_id(chat_id: str | None) -> str:
     return f"...{local[-4:]}@{domain}" if domain else f"...{local[-4:]}"
 
 
+def is_channel(chat_id: str | None) -> bool:
+    """A WhatsApp Channel's id ends in @newsletter; a group's ends in @g.us."""
+    return bool(chat_id) and str(chat_id).strip().endswith("@newsletter")
+
+
 class WhapiClient:
     def __init__(self, token: str | None, *, base_url: str = DEFAULT_BASE_URL, timeout: int = 20,
                  user_agent: str | None = None):
@@ -138,6 +143,12 @@ class WhapiClient:
         data = self._request("GET", f"/communities/{urllib.parse.quote(community_id, safe='@')}/subgroups")
         info = data.get("announceGroupInfo")
         return str(info.get("id")) if isinstance(info, dict) and info.get("id") else None
+
+    def channel_role(self, channel_id: str) -> str | None:
+        """This number's role in a WhatsApp Channel (owner, admin, subscriber), as WhatsApp reports it."""
+        data = self._request("GET", f"/newsletters/{urllib.parse.quote(channel_id, safe='@')}")
+        role = data.get("role")
+        return str(role) if role else None
 
     def send_text(self, chat_id: str, text: str) -> str:
         """Send `text` exactly as given. Returns Whapi's message id."""

@@ -148,8 +148,7 @@ def test_preflight_reports_presence_without_values():
     assert "s3cr3t" not in text and "@g.us" not in text
 
 
-@pytest.mark.parametrize("missing", ["DATABASE_URL", "WHAPI_TOKEN", "WHATSAPP_ANNOUNCEMENT_CHAT_ID",
-                                     "WHATSAPP_COMMUNITY_ID", "FRED_API_KEY"])
+@pytest.mark.parametrize("missing", ["DATABASE_URL", "WHAPI_TOKEN", "WHATSAPP_ANNOUNCEMENT_CHAT_ID", "FRED_API_KEY"])
 def test_preflight_production_fails_on_any_missing_required_setting(missing):
     env = {k: v for k, v in FULL.items() if k != missing}
     lines, problems = preflight.check(production=True, environ=env)
@@ -202,3 +201,8 @@ def test_preflight_runs_as_a_module_without_touching_the_network():
                           capture_output=True, text=True, encoding="utf-8", timeout=60)
     assert "PREFLIGHT (production)" in done.stdout and "Environment variables:" in done.stdout
     assert done.returncode in (0, 1)
+
+
+def test_the_community_id_is_optional_because_a_whatsapp_channel_has_none():
+    _, problems = preflight.check(production=True, environ={k: v for k, v in FULL.items() if k != "WHATSAPP_COMMUNITY_ID"})
+    assert problems == []
