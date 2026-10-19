@@ -32,6 +32,7 @@ from .delivery.service import (
     announcement_chat_id, build_telegram_client, build_whapi_client, deliver_message, deliver_telegram_message,
     send_telegram_test_message, send_test_message, telegram_chat_id,
 )
+from .delivery.mirror import describe as describe_copy, whatsapp_mirror
 from .delivery.telegram import describe_chat
 from . import cards, content_cards, live, pulse, social
 from .delivery.whapi import is_channel, mask_chat_id
@@ -529,6 +530,9 @@ def run_telegram_scheduled(args: argparse.Namespace, settings: Settings, today: 
             return content_cards.send_content_card(db, client, settings, chat_id, slot, library, now=now, dry_run=args.dry_run)
         results = cards.send_scheduled(db, client, settings, chat_id, now=now, dry_run=args.dry_run,
                                        extra_cards={cards.CORNER: content, cards.LEARN: content})
+        copy = None if args.dry_run else whatsapp_mirror(settings)
+        copies = {r.message_key: copy(db, r.message_key, r.kind, r.text, now)
+                  for r in results if copy and r.outcome == OUTCOME_SENT and r.text and r.message_key}
     if args.dry_run:
         print("DRY RUN: nothing is sent and nothing is recorded.\n")
     if not results:
@@ -543,6 +547,10 @@ def run_telegram_scheduled(args: argparse.Namespace, settings: Settings, today: 
             print(f"===== {name} =====\nWould send:\n{result.text}\n")
         elif result.outcome == OUTCOME_SENT:
             print(f"{name}: sent. Telegram message ID {result.provider_message_id}")
+            line = describe_copy(copies.get(result.message_key))
+            if line:
+                print(f"  {line}")
+                failed = failed or "FAILED" in line
         elif result.outcome == cards.OUTCOME_NOT_READY:
             print(f"{name}: skipped ({result.detail}).")
         else:
@@ -593,6 +601,10 @@ def run_telegram_videos(args: argparse.Namespace, settings: Settings, today: dat
         try:
             results = social.send_new_videos(db, client, settings, chat_id, dry_run=args.dry_run,
                                              check_stream=live.stream_checker(settings))
+            copy = None if args.dry_run else whatsapp_mirror(settings)
+            now = datetime.now(timezone.utc)
+            copies = {video.message_key: copy(db, video.message_key, social.MESSAGE_TYPE, caption, now)
+                      for video, result, caption in results if copy and result.outcome == OUTCOME_SENT}
         except social.VideoFeedError as exc:
             logging.getLogger(__name__).warning("Video forwarding: %s", exc)
             print(f"VIDEO FEED ERROR: {exc} It is retried on the next run.", file=sys.stderr)
@@ -610,7 +622,12 @@ def run_telegram_videos(args: argparse.Namespace, settings: Settings, today: dat
         elif result.outcome == OUTCOME_DRY_RUN:
             print(f"Would send (with the cover image):\n{caption}\n")
         elif result.outcome == OUTCOME_SENT:
-            print(f"Sent. Telegram message ID: {result.provider_message_id}\n")
+            print(f"Sent. Telegram message ID: {result.provider_message_id}")
+            line = describe_copy(copies.get(video.message_key))
+            if line:
+                print(line)
+                failed = failed or "FAILED" in line
+            print()
         else:
             failed = True
             print(f"FAILED: {result.error}\n")
@@ -627,6 +644,10 @@ def run_telegram_live(args: argparse.Namespace, settings: Settings, today: date)
     with open_database(settings) as db:
         try:
             results = live.send_live_alerts(db, client, settings, chat_id, dry_run=args.dry_run)
+            copy = None if args.dry_run else whatsapp_mirror(settings)
+            now = datetime.now(timezone.utc)
+            copies = {stream.message_key: copy(db, stream.message_key, live.MESSAGE_TYPE, text, now)
+                      for stream, result, text in results if copy and result.outcome == OUTCOME_SENT}
         except live.LiveCheckError as exc:
             logging.getLogger(__name__).warning("Live check: %s", exc)
             print(f"LIVE CHECK ERROR: {exc} It is retried on the next run.", file=sys.stderr)
@@ -643,6 +664,10 @@ def run_telegram_live(args: argparse.Namespace, settings: Settings, today: date)
             print(f"DRY RUN: nothing is sent and nothing is recorded.\nWould send (with the stream's cover):\n{text}")
         elif result.outcome == OUTCOME_SENT:
             print(f"Sent. Telegram message ID: {result.provider_message_id}")
+            line = describe_copy(copies.get(stream.message_key))
+            if line:
+                print(line)
+                failed = failed or "FAILED" in line
         else:
             failed = True
             print(f"FAILED: {result.error}")

@@ -231,6 +231,9 @@ jobs:
           YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           INSTAGRAM_PROFILE_URL: ${{ vars.INSTAGRAM_PROFILE_URL }}
+          WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
+          WHATSAPP_ANNOUNCEMENT_CHAT_ID: ${{ secrets.WHATSAPP_ANNOUNCEMENT_CHAT_ID }}
+          WHATSAPP_MIRROR: ${{ vars.WHATSAPP_ENABLED }}
         run: python -m src.main --telegram-send-videos
 
       # The day's timetable of cards (src/cards.py): market pulse every two
@@ -247,6 +250,9 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          WHAPI_TOKEN: ${{ secrets.WHAPI_TOKEN }}
+          WHATSAPP_ANNOUNCEMENT_CHAT_ID: ${{ secrets.WHATSAPP_ANNOUNCEMENT_CHAT_ID }}
+          WHATSAPP_MIRROR: ${{ vars.WHATSAPP_ENABLED }}
         run: python -m src.main --telegram-send-scheduled
 
       # The application keeps working from stored data when a source is

@@ -495,6 +495,7 @@ def test_the_live_check_workflow_is_small_safe_and_separate():
     assert code.count("python -m src.main") == 1 and "run: python -m src.main --telegram-send-live" in code
     assert "vars.TELEGRAM_ENABLED == 'true' && vars.YOUTUBE_CHANNEL_ID != ''" in code and "continue-on-error: true" in code
     # Secrets come from GitHub Secrets only; WhatsApp is not involved.
-    assert "YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}" in code and "WHAPI" not in code and "--whatsapp" not in code
+    assert "YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}" in code and "--whatsapp" not in code
+    assert "WHATSAPP_MIRROR: ${{ vars.WHATSAPP_ENABLED }}" in code                  # the alert is copied to WhatsApp when it is on
     assert not re.search(r"AIza[0-9A-Za-z_-]{20,}|UC[A-Za-z0-9_-]{22}", text)
     assert b"\t" not in WORKFLOW.read_bytes() and b"\r\n" not in WORKFLOW.read_bytes()

@@ -338,7 +338,11 @@ def test_the_two_channels_are_independent_in_the_workflow():
     all_steps = steps()
     for name, text in all_steps.items():
         if name.startswith("Telegram:"):
-            assert "WHAPI_TOKEN" not in text and "steps.destination" not in text, name
+            # A Telegram step never waits for, or fails with, WhatsApp. Three of them also send a WhatsApp copy.
+            assert "steps.destination" not in text and "WHATSAPP_ENABLED == 'true'" not in text, name
+            if "WHAPI_TOKEN" in text:
+                assert name in ("Telegram: forward new videos", "Telegram: send the scheduled cards"), name
+                assert "WHATSAPP_MIRROR: ${{ vars.WHATSAPP_ENABLED }}" in text, name
             assert "TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}" in text
         if name.startswith("Send "):
             assert "TELEGRAM" not in text and "steps.telegram" not in text, name
@@ -404,7 +408,7 @@ def test_the_market_pulse_goes_to_telegram_only_on_every_run():
     # A price-source hiccup must not turn the whole run red; the next run retries.
     assert "continue-on-error: true" in step
     # WhatsApp never receives it: 48 posts a day would exhaust the Whapi allowance.
-    assert "WHAPI_TOKEN" not in step and "send-scheduled" not in "\n".join(t for n, t in all_steps.items() if not n.startswith("Telegram:"))
+    assert "WHATSAPP_MIRROR: ${{ vars.WHATSAPP_ENABLED }}" in step and "send-scheduled" not in "\n".join(t for n, t in all_steps.items() if not n.startswith("Telegram:"))
     assert [n for n, t in all_steps.items() if "continue-on-error" in t] == [
         "Telegram: forward new videos", "Telegram: send the scheduled cards"]
 
@@ -423,7 +427,8 @@ def test_whatsapp_is_off_unless_the_repository_variable_enables_it():
     # Telegram does not depend on WhatsApp in any way.
     for name, text in all_steps.items():
         if name.startswith("Telegram:"):
-            assert "WHATSAPP_ENABLED" not in text and "steps.destination" not in text, name
+            condition = text.split("env:")[0]
+            assert "WHATSAPP_ENABLED" not in condition and "steps.destination" not in text, name
 
 
 # -- video forwarding ----------------------------------------------------------------------
@@ -434,6 +439,6 @@ def test_video_forwarding_runs_only_when_a_channel_is_configured():
     assert "vars.YOUTUBE_CHANNEL_ID != ''" in step and "vars.TELEGRAM_ENABLED == 'true'" in step
     assert "YOUTUBE_CHANNEL_ID: ${{ vars.YOUTUBE_CHANNEL_ID }}" in step
     assert "INSTAGRAM_PROFILE_URL: ${{ vars.INSTAGRAM_PROFILE_URL }}" in step
-    assert "continue-on-error: true" in step and "WHAPI_TOKEN" not in step and "steps.plan.outputs" not in step
+    assert "continue-on-error: true" in step and "WHATSAPP_MIRROR: ${{ vars.WHATSAPP_ENABLED }}" in step and "steps.plan.outputs" not in step
     # The channel id is configuration, not source: it is never written into the workflow file.
     assert not re.search(r"UC[A-Za-z0-9_-]{22}", workflow_text(PRODUCTION))
