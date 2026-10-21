@@ -157,5 +157,96 @@ def test_deploy_sets_the_settings_and_publishes_only_the_receiver():
                                             "WHATSAPP_CHAT_ID", "WHAPI_BASE_URL"}
     assert all(v["type"] == "encrypted" for v in env_call)
     deployment = next(p for m, path, p in log if path == "/v13/deployments")
-    assert {f["file"] for f in deployment["files"]} == {"api/trade.py", "requirements.txt"}
+    assert {f["file"] for f in deployment["files"]} == {"api/trade.py", "api/telegram.py", "requirements.txt"}
     assert "123:TEST" not in json.dumps(deployment) and SECRET not in json.dumps(deployment)
+
+
+# -- typed trades in Telegram --------------------------------------------------------------
+
+import sys as _sys
+_sys.path.insert(0, str(PROJECT_ROOT / "web" / "trade-alerts" / "api"))
+_tspec = importlib.util.spec_from_file_location("typed_trades", PROJECT_ROOT / "web" / "trade-alerts" / "api" / "telegram.py")
+typed = importlib.util.module_from_spec(_tspec)
+_tspec.loader.exec_module(typed)
+OWNER = "424242"
+TENV = {**ENV, "OWNER_TELEGRAM_ID": OWNER}
+
+
+def update(text, *, sender=OWNER, chat_type="private", reply_to=None):
+    message = {"message_id": 7, "from": {"id": int(sender)}, "chat": {"id": int(sender), "type": chat_type}, "text": text}
+    if reply_to:
+        message["reply_to_message"] = {"text": reply_to}
+    return {"message": message}
+
+
+def run(text, **kwargs):
+    posts, replies = [], []
+    senders = (lambda t, e: posts.append(("telegram", t)) or (True, "ok"), lambda t, e: posts.append(("whatsapp", t)) or (True, "ok"))
+    result = typed.handle_update(update(text, **kwargs), TENV, senders=senders, now=NOW,
+                                 reply=lambda chat, txt, env, reply_to=None: replies.append(txt))
+    return result, posts, replies
+
+
+def test_a_typed_trade_is_posted_to_both_channels_and_confirmed_privately():
+    result, posts, replies = run("Buy XAUUSD 4120.5 SL 4110 TP 4140")
+    assert result == "posted" and [c for c, _ in posts] == ["telegram", "whatsapp"]
+    assert posts[0][1].startswith("🟢 *BUY XAUUSD* @ 4,120.50\nSL 4,110.00 · TP 4,140.00")
+    assert replies[0].startswith("Posted to Telegram ✅ · WhatsApp ✅") and replies[0].endswith("Trade: BUY XAUUSD 4120.5 | SL 4110 | TP 4140")
+
+
+def test_replies_carry_the_trade_forward_without_any_memory():
+    confirmation = "Posted\nTrade: BUY XAUUSD 4120.5 | SL 4110 | TP 4140"
+    _, posts, _ = run("tp", reply_to=confirmation)
+    assert posts[0][1].startswith("✅ *TP HIT* · XAUUSD BUY\nEntry 4,120.50 → Exit 4,140.00\nResult: +19.50 (+1,950 points)")
+    _, posts, _ = run("sl", reply_to=confirmation)
+    assert posts[0][1].startswith("❌ *SL HIT*") and "-1,050 points" in posts[0][1]
+    _, posts, replies = run("close 4135", reply_to=confirmation)
+    assert posts[0][1].startswith("✋ *CLOSED MANUALLY*") and "+1,450 points" in posts[0][1] and "Trade:" not in replies[0]
+    _, posts, replies = run("be", reply_to=confirmation)
+    assert "SL 4,120.50 · TP 4,140.00 (breakeven)" in posts[0][1] and replies[0].endswith("Trade: BUY XAUUSD 4120.5 | SL 4120.5 | TP 4140")
+    _, posts, replies = run("move tp 4150", reply_to=confirmation)
+    assert "TP 4,150.00" in posts[0][1] and replies[0].endswith("| TP 4150")
+
+
+def test_pending_orders_can_be_filled_or_cancelled():
+    _, posts, replies = run("sell limit xauusd 4140 sl 4150 tp 4110")
+    assert posts[0][1].startswith("⏳ *PENDING ORDER* · XAUUSD\nSELL LIMIT @ 4,140.00") and replies[0].endswith("Trade: SELL LIMIT XAUUSD 4140 | SL 4150 | TP 4110")
+    pending = "x\nTrade: SELL LIMIT XAUUSD 4140 | SL 4150 | TP 4110"
+    _, posts, _ = run("cancel", reply_to=pending)
+    assert posts[0][1].startswith("🚫 *ORDER CANCELLED* · XAUUSD\nSELL LIMIT @ 4,140.00")
+    _, posts, replies = run("filled", reply_to=pending)
+    assert posts[0][1].startswith("🔴 *SELL XAUUSD* @ 4,140.00") and replies[0].endswith("Trade: SELL XAUUSD 4140 | SL 4150 | TP 4110")
+    _, posts, replies = run("tp", reply_to=pending)
+    assert posts == [] and "pending order" in replies[0]
+
+
+def test_only_the_owner_in_a_private_chat_can_post():
+    for kwargs in ({"sender": "999"}, {"chat_type": "group"}, {"chat_type": "channel"}):
+        result, posts, replies = run("buy xauusd 4120 sl 4110 tp 4140", **kwargs)
+        assert result == "ignored" and posts == [] and replies == []
+    no_owner = typed.handle_update(update("buy xauusd 4120"), ENV, senders=(None, None), reply=lambda *a, **k: None)
+    assert no_owner == "ignored"
+
+
+def test_anything_else_gets_help_and_posts_nothing():
+    for text in ("hello", "buy gold now", "buy xauusd", "close 4135"):
+        result, posts, replies = run(text)
+        assert result == "help" and posts == [] and replies
+    result, posts, replies = run("close 4135", reply_to="just some message")
+    assert posts == [] and "Trade:" in replies[0]
+
+
+def test_the_owner_is_found_from_the_setup_word_only():
+    calls = []
+
+    def call(method, payload):
+        calls.append(method)
+        if method == "getUpdates":
+            return {"result": [
+                {"message": {"chat": {"type": "private"}, "from": {"id": 111}, "text": "hi"}},
+                {"message": {"chat": {"type": "group"}, "from": {"id": 222}, "text": "owner-setup"}},
+                {"message": {"chat": {"type": "private"}, "from": {"id": 424242}, "text": "Owner-Setup"}},
+            ]}
+        return {"ok": True}
+    assert trade_alerts.find_owner_id("tok", call=call) == "424242" and calls == ["deleteWebhook", "getUpdates"]
+    assert trade_alerts.find_owner_id("tok", call=lambda m, p: {"result": []} if m == "getUpdates" else {}) is None

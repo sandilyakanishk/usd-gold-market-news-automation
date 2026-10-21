@@ -530,14 +530,27 @@ def run_deploy_trade_alerts(settings: Settings) -> int:
     if not token:
         print("VERCEL_TOKEN is not set.", file=sys.stderr)
         return 2
-    secret = trade_alerts.ensure_secret(PROJECT_ROOT / ".env")
+    env_file = PROJECT_ROOT / ".env"
+    secret = trade_alerts.ensure_secret(env_file)
+    hook_secret = trade_alerts.ensure_secret(env_file, name="TELEGRAM_WEBHOOK_SECRET")
+    owner = (os.environ.get("OWNER_TELEGRAM_ID") or "").strip()
+    if not owner and settings.telegram_bot_token:
+        owner = trade_alerts.find_owner_id(settings.telegram_bot_token) or ""
+        if owner:
+            trade_alerts.save_setting(env_file, "OWNER_TELEGRAM_ID", owner)
     try:
-        address = trade_alerts.deploy(settings, token, secret)
+        address = trade_alerts.deploy(settings, token, secret,
+                                      extra={"TELEGRAM_WEBHOOK_SECRET": hook_secret, "OWNER_TELEGRAM_ID": owner})
+        if owner:
+            trade_alerts.set_webhook(settings.telegram_bot_token, f"{address}/api/telegram", hook_secret)
     except (trade_alerts.TradeAlertsError, reel_script.ReelScriptError) as exc:
         print(f"TRADE ALERTS ERROR: {exc}", file=sys.stderr)
         return 1
     print(f"Trade alerts receiver: {address}/api/trade")
-    print("The shared secret is TRADE_WEBHOOK_SECRET in the project's .env file.")
+    if owner:
+        print("Typed trades: on. Message the bot privately, for example: buy xauusd 4120.5 sl 4110 tp 4140")
+    else:
+        print(f"Typed trades: not on yet. Send the word '{trade_alerts.SETUP_WORD}' to the bot in a private chat, then run this again.")
     return 0
 
 
