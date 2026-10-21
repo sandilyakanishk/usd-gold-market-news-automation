@@ -1137,9 +1137,10 @@ WhatsApp copies stop until the next month; Telegram is unaffected.
 
 ## Owner's reel script (private page)
 
-Once a day's recap is out (23:35 India time), the bot writes a 45 to 60
-second reel script about that day in Hinglish: the USD releases with their
-figures, how gold moved, and what comes next (`src/reel_script.py`). The AI
+Every morning from 07:00 India time the bot writes a short reel script (about
+85 to 130 spoken words) in Hinglish: a fresh hook, yesterday's Forex Factory
+releases and gold move, and what that can mean for today, without clock
+times (`src/reel_script.py`). The AI
 writer (Gemini) writes it; if it cannot, a plain template version is used.
 The same checks as everywhere apply: news and numbers, never buy/sell calls,
 targets or predictions.

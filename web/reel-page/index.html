@@ -22,6 +22,8 @@
   .eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
   h1 { font-size: 26px; line-height: 1.25; margin: 6px 0 4px; }
   .meta { color: var(--muted); font-size: 14px; }
+  .updated { display: inline-block; margin: 6px 0 4px; padding: 4px 10px; border-radius: 999px;
+             background: var(--soft); color: var(--ink); font-size: 14px; font-weight: 600; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin: 14px 0; }
   .card h2 { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
   .hook { background: var(--soft); border-color: transparent; font-size: 19px; font-weight: 600; }
@@ -62,6 +64,7 @@
     <header>
       <div class="eyebrow" id="day"></div>
       <h1 id="title"></h1>
+      <div class="updated" id="updated"></div>
       <div class="meta" id="generated"></div>
     </header>
     <div class="card hook"><h2>Hook</h2><div id="hook"></div></div>
@@ -73,7 +76,7 @@
       <button id="copy-caption" class="secondary">Copy caption</button>
       <button id="lock-again" class="secondary">Lock</button>
     </div>
-    <p class="note">News and numbers only, not trading advice. Only the latest script is kept here; it is replaced every night after the recap.</p>
+    <p class="note">News and numbers only, not trading advice. Only the latest script is kept here; it is replaced every morning at 7:00 AM IST.</p>
   </section>
 </main>
 <script>
@@ -111,8 +114,11 @@
     const day = new Date(s.day + "T00:00:00");
     $("day").textContent = "Script for " + day.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
     $("title").textContent = s.title;
-    $("generated").textContent = "Written " + new Date(s.generated_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
-      + " IST · " + (s.source === "ai" ? "by the AI writer" : "from the template");
+    const updated = new Date(s.generated_at).toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata", weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true });
+    $("updated").textContent = "🕒 Updated " + updated + " IST";
+    $("generated").textContent = (s.source === "ai" ? "Written by the AI writer" : "From the template")
+      + " · a new script arrives every morning at 7:00 AM IST";
     $("hook").textContent = s.hook;
     $("lines").replaceChildren(...s.lines.map((line) => Object.assign(document.createElement("li"), { textContent: line })));
     $("overlays").replaceChildren(...s.on_screen.map((t) => Object.assign(document.createElement("span"), { className: "chip", textContent: t })));

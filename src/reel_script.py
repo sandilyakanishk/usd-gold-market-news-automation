@@ -45,14 +45,16 @@ MESSAGE_TYPE = "OWNER_REEL_SCRIPT"
 PROVIDER = "vercel"
 DESTINATION = "owner_reel_page"
 # The day's script is written once its recap is out; until then the page keeps the previous day's.
-READY_AT = time(23, 35)
+# Published once each morning, about the day before, ready for that day's reel.
+PUBLISH_AT = time(7, 0)
 PAGE_DIR = PROJECT_ROOT / "web" / "reel-page"
 VERCEL_API = "https://api.vercel.com"
 PBKDF2_ROUNDS = 310_000
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 HOOK_MEMORY = "reel_hooks"  # content_state row remembering the last hooks used
 # A one-minute reel spoken at a natural Hinglish pace.
-MIN_WORDS, MAX_WORDS = 150, 190
+# A short reel (about 35 to 50 seconds), simple enough to record in one go.
+MIN_WORDS, MAX_WORDS = 85, 130
 
 # Reports news; never advises. Explaining what a release is remains fine.
 _FORBIDDEN = re.compile(
@@ -83,9 +85,21 @@ class ReelScript:
 # -- which day ------------------------------------------------------------------------------
 
 def target_day(now: datetime, tz: ZoneInfo | timezone) -> date:
-    """Today once today's recap is out, otherwise yesterday."""
-    local = now.astimezone(tz)
-    return local.date() if local.time() >= READY_AT else local.date() - timedelta(days=1)
+    """The day the morning's script is about: always yesterday."""
+    return now.astimezone(tz).date() - timedelta(days=1)
+
+
+def is_due(now: datetime, tz: ZoneInfo | timezone) -> bool:
+    """The script is published from PUBLISH_AT each morning; before that the page keeps the previous one."""
+    return now.astimezone(tz).time() >= PUBLISH_AT
+
+
+def _for_the_ai(facts: dict) -> dict:
+    """The facts without clock times: the reel does not mention them."""
+    def strip(items):
+        return [{k: v for k, v in item.items() if k not in ("time_ist", "time")} for item in items or []]
+    return {**facts, "releases": strip(facts.get("releases")), "coming_up": strip(facts.get("coming_up")),
+            "today": {**(facts.get("today") or {}), "releases": strip((facts.get("today") or {}).get("releases"))}}
 
 
 # -- the day's facts ------------------------------------------------------------------------
@@ -173,7 +187,7 @@ def build_prompt(facts: dict, recent_hooks: list[str] | None = None) -> str:
         "You write a short Instagram/YouTube reel script for a gold (XAU/USD) and forex trading creator in India.",
         "Write it in natural Hinglish: Hindi words in Roman script mixed with English, the way young Indian traders speak.",
         "The viewer watches it the next morning, so 'yesterday' is the day in 'releases' and 'gold', and 'today' is 'today'.",
-        f"It is a full ONE-MINUTE reel: {MIN_WORDS} to {MAX_WORDS} spoken words in total (hook plus lines), in exactly this order:",
+        f"It is a SHORT reel: {MIN_WORDS} to {MAX_WORDS} spoken words in total (hook plus lines), in exactly this order:",
         f"1. HOOK: one line, in this style: {_pick(HOOK_STYLES, day)}. Make it fresh: it must not resemble any recent hook.",
         "2. YESTERDAY'S MARKET: the US releases from the Forex Factory calendar ('releases': what each measures, forecast,",
         "   previous; the result only if 'actual' is given) and how gold moved ('gold': open, high, low, close, change).",
@@ -193,11 +207,12 @@ def build_prompt(facts: dict, recent_hooks: list[str] | None = None) -> str:
         lines.append("Recent hooks you must not repeat or imitate: " + " | ".join(h[:100] for h in recent_hooks[-10:]))
     return "\n".join(lines + [
         'Reply with JSON only: {"title": "...", "hook": "...", "lines": ["...", "..."], "on_screen": ["...", "..."], "caption": "..."}',
-        "title: under 60 characters. hook: one spoken sentence. lines: 10 to 14 spoken lines after the hook,",
-        "covering parts 2, 3 and 4 in order; give part 2 and part 3 about equal time, and explain each release in a sentence",
-        "or two (what it measures and why traders care) so the reel fills the full minute.",
+        "title: under 60 characters. hook: one spoken sentence. lines: 6 to 9 short spoken lines after the hook,",
+        "covering parts 2, 3 and 4 in order. Keep it simple and easy to say in one take: short sentences, everyday words,",
+        "only the most important releases (skip minor ones if there are many), and only the key numbers (for example",
+        "gold's close and change, and a headline forecast). Do NOT mention clock times or dates; say 'kal' and 'aaj'.",
         "on_screen: 3 to 6 very short text overlays. caption: under 300 characters, may end with up to 5 hashtags.",
-        "Facts (JSON): " + json.dumps(facts, ensure_ascii=False),
+        "Facts (JSON): " + json.dumps(_for_the_ai(facts), ensure_ascii=False),
     ])
 
 
@@ -248,35 +263,28 @@ def template_script(facts: dict) -> ReelScript:
     today = (facts.get("today") or {}).get("releases") or []
     lines = ["Pehle dekhte hain kal ka market."]
     released = [r for r in releases if r.get("actual")]
-    for r in releases[:4]:
+    for r in releases[:3]:
         if r.get("actual"):
             versus = f", forecast tha {r['forecast']}" if r.get("forecast") else ""
             lines.append(f"{r['name']} aaya {r['actual']}{versus}.")
         else:
             figures = [f"forecast {r['forecast']}" if r.get("forecast") else "", f"previous {r['previous']}" if r.get("previous") else ""]
             figures = ", ".join(f for f in figures if f)
-            lines.append(f"{r['time_ist']} IST par {r['name']} ({r['impact'].lower()} impact)" + (f": {figures}." if figures else "."))
+            lines.append(f"{r['name']} aaya" + (f", {figures}." if figures else "."))
     if not releases:
         lines.append("Kal Forex Factory par US ka koi data release nahi tha.")
     if gold:
         direction = "upar" if gold["change"] > 0 else "neeche" if gold["change"] < 0 else "flat"
-        lines.append(f"Gold ne din ki shuruaat ki {gold['open']:,.2f} dollar par.")
-        lines.append(f"High bana {gold['high']:,.2f} aur low {gold['low']:,.2f}.")
-        lines.append(f"Din khatam hua {gold['close']:,.2f} par, yaani {abs(gold['change']):,.2f} dollar {direction}.")
+        lines.append(f"Gold kal {gold['close']:,.2f} par close hua, yaani {abs(gold['change']):,.2f} dollar {direction}.")
     if today:
         key = today[0]
         figures = f", forecast {key['forecast']}" if key.get("forecast") else ""
-        lines.append(f"Aaj sabse important hai {key['name']}, {key['time_ist']} IST par{figures}.")
+        lines.append(f"Aaj sabse important hai {key['name']}{figures}.")
         lines.append("Agar figure forecast se kaafi alag aaya, to dollar aur gold dono mein tez move aa sakta hai.")
     elif ahead:
         lines.append(f"Aaj US ka bada data nahi hai; agla important release hai {ahead[0]['name']}.")
         lines.append("Aise quiet din par gold aksar kal ke range ke aas-paas hi rehta hai, par surprise kabhi bhi aa sakta hai.")
-    # Explaining lines so the plain version also fills about a minute.
-    lines += [
-        "Yaad rakho, market sirf number par nahi, forecast aur actual ke farak par react karta hai.",
-        "Isliye release se pehle aur baad ke kuch minute sabse zyada volatile hote hain.",
-        "Spread bhi us waqt badh sakta hai, to apna risk pehle se plan karke rakho.",
-    ]
+    lines.append("Yaad rakho, market forecast aur actual ke farak par react karta hai.")
     lines.append(_pick(("Kal ka update chahiye to follow kar lo.", "Comment mein batao aaj tumhe kya lagta hai.",
                         "Ye reel save kar lo, trade se pehle kaam aayegi.", "Kisi trader dost ko share karo."), day))
     while len(lines) < 4:
@@ -409,6 +417,8 @@ def run(db: EventRepository, settings: Settings, *, now: datetime | None = None,
     env = os.environ if environ is None else environ
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     tz = ZoneInfo(settings.display_timezone) if settings.display_timezone else timezone.utc
+    if day is None and not is_due(now, tz):
+        return "NOT_DUE", None, f"the script is published from {PUBLISH_AT.strftime('%H:%M')} each morning"
     day = day or target_day(now, tz)
     key = f"REEL_SCRIPT_{day.isoformat()}"
     existing = db.get_delivery(key, PROVIDER, DESTINATION)

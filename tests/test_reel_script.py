@@ -45,16 +45,23 @@ def fake_vercel(log):
 GOOD_AI = {"title": "CPI ne gold ko hila diya", "hook": "Kal US CPI aaya aur gold mein bada move dikha.",
            "lines": ["CPI aaya 0.4 percent, forecast tha 0.3.", "Dollar mazboot hua.", "Gold 4,090 tak gaya.",
                      "Phir 4,118 par close hua.", "Kal Retail Sales aayenge, dhyaan rakhna."]
-           + ["Ye line script ko ek poore minute tak le jaane ke liye thodi lambi rakhi gayi hai taaki words poore hon."] * 7,
+           + ["Ye line script ko ek poore minute tak le jaane ke liye thodi lambi rakhi gayi hai taaki words poore hon."] * 3,
            "on_screen": ["US CPI 0.4%", "Gold close 4,118"], "caption": "Kal ka USD news aur gold recap. Sirf information. #gold"}
 
 
 # -- timing --------------------------------------------------------------------------------
 
-def test_the_day_written_about_is_today_after_the_recap_and_yesterday_before_it():
-    assert rs.target_day(ist(DAY, 23, 35), IST) == DAY
-    assert rs.target_day(ist(DAY, 23, 34), IST) == DAY - timedelta(days=1)
-    assert rs.target_day(ist(DAY, 9, 0), IST) == DAY - timedelta(days=1)       # the morning still shows yesterday's
+def test_the_script_is_published_each_morning_about_yesterday():
+    assert rs.target_day(ist(DAY, 7, 0), IST) == DAY - timedelta(days=1)
+    assert rs.target_day(ist(DAY, 23, 50), IST) == DAY - timedelta(days=1)
+    assert not rs.is_due(ist(DAY, 6, 59), IST) and rs.is_due(ist(DAY, 7, 0), IST)
+
+
+def test_nothing_is_published_before_seven_in_the_morning(db):
+    log = []
+    assert rs.run(db, SETTINGS, now=ist(DAY, 6, 30), environ=ENV, call=fake_vercel(log))[0] == "NOT_DUE" and log == []
+    assert rs.run(db, SETTINGS, now=ist(DAY, 7, 5), environ=ENV, call=fake_vercel(log))[0] == "SENT"
+    assert db.get_delivery("REEL_SCRIPT_2026-10-20", "vercel", "owner_reel_page") is not None
 
 
 # -- facts and script ----------------------------------------------------------------------
@@ -69,7 +76,7 @@ def test_the_template_version_states_only_facts_in_hinglish(db):
     script = rs.template_script(rs.day_facts(db, DAY, IST, now=ist(DAY, 23, 40)))
     assert script.source == "template" and "21 October" in script.title
     text = " ".join([script.hook, *script.lines])
-    assert "4,100.00" in text and "4,118.00" in text and "upar" in text and "kal ka market" in text
+    assert "4,118.00" in text and "18.00 dollar upar" in text and "kal ka market" in text
     assert any(w in text.lower() for w in ("follow", "comment", "save", "share"))
 
 
@@ -116,7 +123,9 @@ def test_every_forex_factory_release_of_the_day_is_in_the_facts_most_important_f
     script = rs.template_script(facts)
     text = " ".join(script.lines)
     assert "Core CPI m/m aaya 0.4%, forecast tha 0.3%" in text and "Building Permits" in text and "forecast 1.39M" in text
-    assert text.index("Core CPI") < text.index("Gold ne")                    # the news comes first, then gold
+    assert "6:00 PM" not in text and "IST" not in text
+    assert "6:00 PM" not in rs.build_prompt(facts) and '"time_ist"' not in rs.build_prompt(facts)
+    assert text.index("Core CPI") < text.index("Gold kal")                    # the news comes first, then gold
     prompt = rs.build_prompt(facts)
     assert "Forex Factory" in prompt and "the result only if 'actual' is given" in prompt and "Building Permits" in prompt
 
@@ -192,11 +201,11 @@ def test_publishing_deploys_once_and_removes_every_older_version():
 
 def test_one_script_per_day_and_nothing_goes_to_a_channel(db):
     log = []
-    first = rs.run(db, SETTINGS, now=ist(DAY, 23, 40), environ=ENV, call=fake_vercel(log))
+    first = rs.run(db, SETTINGS, now=ist(DAY, 7, 10), environ=ENV, call=fake_vercel(log))
     assert first[0] == "SENT" and "test-reels.vercel.app" in first[2]
-    again = rs.run(db, SETTINGS, now=ist(DAY, 23, 50), environ=ENV, call=fake_vercel(log))
+    again = rs.run(db, SETTINGS, now=ist(DAY, 9, 50), environ=ENV, call=fake_vercel(log))
     assert again[0] == "ALREADY_SENT" and sum(1 for d in log if d[0] == "POST") == 1
-    record = db.get_delivery("REEL_SCRIPT_2026-10-21", "vercel", "owner_reel_page")
+    record = db.get_delivery("REEL_SCRIPT_2026-10-20", "vercel", "owner_reel_page")
     assert record.status == "SENT" and record.destination == "owner_reel_page"
     assert {r.provider for r in db.list_deliveries()} == {"vercel"}            # no telegram, no whapi
 
@@ -245,4 +254,5 @@ def test_an_ai_script_must_fill_a_whole_minute():
 
 def test_the_template_version_is_close_to_a_minute_too(db):
     script = rs.template_script(rs.day_facts(db, DAY, IST, now=ist(DAY, 23, 40)))
-    assert rs.spoken_words(script) >= 100
+    assert 40 <= rs.spoken_words(script) <= rs.MAX_WORDS
+    assert not any(" PM" in line or " AM" in line or "IST" in line for line in script.lines)      # no clock times
