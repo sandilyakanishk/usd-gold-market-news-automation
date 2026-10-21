@@ -224,7 +224,7 @@ def validate(raw: object, day: str, source: str) -> ReelScript:
         day=day, title=_text(raw.get("title"), "the title", 80), hook=_text(raw.get("hook"), "the hook", 220, 10),
         lines=[_text(line, "a line", 260, 5) for line in lines], on_screen=[_text(o, "an on-screen text", 70, 2) for o in overlays],
         caption=_text(raw.get("caption"), "the caption", 400, 10), source=source)
-    if source == "ai" and not (MIN_WORDS <= spoken_words(script) <= MAX_WORDS + 40):
+    if source == "ai" and not (MIN_WORDS <= spoken_words(script) <= MAX_WORDS + 15):
         raise ReelScriptError(f"the script has {spoken_words(script)} spoken words; a one-minute reel needs {MIN_WORDS} to {MAX_WORDS}")
     return script
 

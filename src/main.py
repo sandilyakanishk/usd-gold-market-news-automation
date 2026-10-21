@@ -23,7 +23,7 @@ from .content.models import ACTUAL_RESULT, HIGH_ALERT, MORNING_UPDATE, UPCOMING_
 from .content.templates import TemplateConfigError
 from .collector.models import IMPACT_HIGH, IMPACT_LOW, IMPACT_MEDIUM, Event
 from .collector.parser import MalformedFeedError
-from .config import Settings
+from .config import PROJECT_ROOT, Settings
 from .database.base import DatabaseError
 from .database.factory import open_database
 from .delivery.models import OUTCOME_ALREADY_SENT, OUTCOME_DRY_RUN, OUTCOME_SENT
@@ -34,7 +34,7 @@ from .delivery.service import (
 )
 from .delivery.mirror import describe as describe_copy, whatsapp_mirror
 from .delivery.telegram import describe_chat
-from . import cards, content_cards, live, pulse, reel_script, social
+from . import cards, content_cards, live, pulse, reel_script, social, trade_alerts
 from .delivery.whapi import is_channel, mask_chat_id
 from .filters.gold_usd_filters import USD
 from .pipeline import cleanup_old_events, sync
@@ -126,6 +126,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="forward new YouTube Shorts from YOUTUBE_CHANNEL_ID (cover image, caption and link)")
     tg.add_argument("--telegram-send-live", action="store_true",
                     help="post an alert if the YouTube channel is live right now")
+    tg.add_argument("--deploy-trade-alerts", action="store_true",
+                    help="deploy the MT5 trade alerts receiver to Vercel (posts each trade to Telegram and WhatsApp)")
     tg.add_argument("--owner-reel-script", action="store_true",
                     help="write the latest finished day's Hinglish reel script and publish it to the owner's private page")
     tg.add_argument("--telegram-send-scheduled", action="store_true",
@@ -521,6 +523,24 @@ def run_telegram_send(args: argparse.Namespace, settings: Settings, today: date)
         destination_text=f"telegram_channel ({describe_chat(chat_id)}) via telegram", id_label="Telegram message ID")
 
 
+def run_deploy_trade_alerts(settings: Settings) -> int:
+    """Deploy the trade alerts receiver. Prints its address, never a secret."""
+    import os
+    token = (os.environ.get("VERCEL_TOKEN") or "").strip()
+    if not token:
+        print("VERCEL_TOKEN is not set.", file=sys.stderr)
+        return 2
+    secret = trade_alerts.ensure_secret(PROJECT_ROOT / ".env")
+    try:
+        address = trade_alerts.deploy(settings, token, secret)
+    except (trade_alerts.TradeAlertsError, reel_script.ReelScriptError) as exc:
+        print(f"TRADE ALERTS ERROR: {exc}", file=sys.stderr)
+        return 1
+    print(f"Trade alerts receiver: {address}/api/trade")
+    print("The shared secret is TRADE_WEBHOOK_SECRET in the project's .env file.")
+    return 0
+
+
 def run_owner_reel_script(args: argparse.Namespace, settings: Settings, today: date) -> int:
     """The owner's daily reel script, published to a private page. Never posted to a channel."""
     day = date.fromisoformat(args.date) if args.date else None
@@ -857,6 +877,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_telegram_check(settings)
         if args.telegram_test:
             return run_telegram_test(settings)
+        if args.deploy_trade_alerts:
+            return run_deploy_trade_alerts(settings)
         if args.owner_reel_script:
             return run_owner_reel_script(args, settings, today)
         if args.telegram_send_scheduled:
