@@ -14,7 +14,8 @@ from src.runplan import RunPlan, plan
 
 from .test_cloud_runner import SAFE_TEST, SECRET_NAMES, WORKFLOWS, code_lines, workflow_text
 
-PRODUCTION_SECRETS = SECRET_NAMES | {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GEMINI_API_KEY", "YOUTUBE_API_KEY"}
+PRODUCTION_SECRETS = SECRET_NAMES | {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GEMINI_API_KEY", "YOUTUBE_API_KEY",
+                                     "VERCEL_TOKEN", "REEL_PAGE_PASSWORD"}
 TELEGRAM_GUARD = ("!cancelled() && vars.TELEGRAM_ENABLED == 'true' && steps.preflight.outcome == 'success' "
                   "&& steps.collect.outcome == 'success' && steps.telegram.outcome == 'success'")
 
@@ -210,6 +211,7 @@ def test_it_refreshes_and_enriches_before_any_send():
         "Telegram: check the bot and the channel (sends nothing)", "Telegram: send the morning update",
         "Telegram: send today's high-impact alerts", "Telegram: send newly released results",
         "Telegram: send tomorrow's reminders", "Telegram: forward new videos", "Telegram: send the scheduled cards",
+        "Owner: publish the daily reel script",
         "Fail the run if a source reported a problem"]
     collect = all_steps["Refresh the calendar and look up released figures"]
     assert commands(collect) == ["python -m src.main --enrich-actuals --week > collect.out 2> collect.err"]
@@ -262,8 +264,8 @@ def test_it_fails_loudly_and_never_retries():
     for forbidden in ("retry", "while ", "until ", "sleep", "|| true"):
         assert forbidden not in text, forbidden
     # The one tolerated failure is the half-hourly market pulse, an extra that the next run repeats.
-    assert text.count("continue-on-error") == 2
-    for extra in ("Telegram: send the scheduled cards", "Telegram: forward new videos"):
+    assert text.count("continue-on-error") == 3
+    for extra in ("Telegram: send the scheduled cards", "Telegram: forward new videos", "Owner: publish the daily reel script"):
         assert "continue-on-error" in all_steps[extra]
     assert "timeout-minutes: 10" in text and "contents: read" in text and "DATABASE_BACKEND: postgres" in text
 
@@ -410,7 +412,7 @@ def test_the_market_pulse_goes_to_telegram_only_on_every_run():
     # WhatsApp never receives it: 48 posts a day would exhaust the Whapi allowance.
     assert "WHATSAPP_MIRROR: ${{ vars.WHATSAPP_ENABLED }}" in step and "send-scheduled" not in "\n".join(t for n, t in all_steps.items() if not n.startswith("Telegram:"))
     assert [n for n, t in all_steps.items() if "continue-on-error" in t] == [
-        "Telegram: forward new videos", "Telegram: send the scheduled cards"]
+        "Telegram: forward new videos", "Telegram: send the scheduled cards", "Owner: publish the daily reel script"]
 
 
 # -- WhatsApp is opt-in --------------------------------------------------------------------
@@ -442,3 +444,11 @@ def test_video_forwarding_runs_only_when_a_channel_is_configured():
     assert "continue-on-error: true" in step and "WHATSAPP_MIRROR: ${{ vars.WHATSAPP_ENABLED }}" in step and "steps.plan.outputs" not in step
     # The channel id is configuration, not source: it is never written into the workflow file.
     assert not re.search(r"UC[A-Za-z0-9_-]{22}", workflow_text(PRODUCTION))
+
+
+def test_the_owner_reel_script_is_never_sent_to_a_channel():
+    step = steps()["Owner: publish the daily reel script"]
+    assert commands(step) == ["python -m src.main --owner-reel-script"]
+    assert "VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}" in step and "REEL_PAGE_PASSWORD: ${{ secrets.REEL_PAGE_PASSWORD }}" in step
+    for channel_secret in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "WHAPI_TOKEN", "WHATSAPP"):
+        assert channel_secret not in step

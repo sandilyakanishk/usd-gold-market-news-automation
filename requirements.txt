@@ -4,5 +4,8 @@ tzdata>=2024.1
 # PostgreSQL driver, used only when DATABASE_BACKEND=postgres.
 psycopg[binary]>=3.2
 
+# Encrypts the owner's reel script for the private page.
+cryptography>=42
+
 # Development
 pytest>=8.0

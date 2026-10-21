@@ -255,6 +255,21 @@ jobs:
           WHATSAPP_MIRROR: ${{ vars.WHATSAPP_ENABLED }}
         run: python -m src.main --telegram-send-scheduled
 
+      # The owner's daily reel script (src/reel_script.py): written once the
+      # day's recap is out and published, encrypted, to a private Vercel page.
+      # Never posted to Telegram or WhatsApp. Off until VERCEL_TOKEN and
+      # REEL_PAGE_PASSWORD are set; a failure is retried by the next run.
+      - name: "Owner: publish the daily reel script"
+        if: ${{ !cancelled() && steps.preflight.outcome == 'success' && steps.collect.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          REEL_PAGE_PASSWORD: ${{ secrets.REEL_PAGE_PASSWORD }}
+          REEL_PAGE_PROJECT: ${{ vars.REEL_PAGE_PROJECT }}
+        run: python -m src.main --owner-reel-script
+
       # The application keeps working from stored data when a source is
       # unavailable. This step makes sure such a run is still reported as
       # failed, so the problem is not missed.

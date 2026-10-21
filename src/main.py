@@ -34,7 +34,7 @@ from .delivery.service import (
 )
 from .delivery.mirror import describe as describe_copy, whatsapp_mirror
 from .delivery.telegram import describe_chat
-from . import cards, content_cards, live, pulse, social
+from . import cards, content_cards, live, pulse, reel_script, social
 from .delivery.whapi import is_channel, mask_chat_id
 from .filters.gold_usd_filters import USD
 from .pipeline import cleanup_old_events, sync
@@ -126,6 +126,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="forward new YouTube Shorts from YOUTUBE_CHANNEL_ID (cover image, caption and link)")
     tg.add_argument("--telegram-send-live", action="store_true",
                     help="post an alert if the YouTube channel is live right now")
+    tg.add_argument("--owner-reel-script", action="store_true",
+                    help="write the latest finished day's Hinglish reel script and publish it to the owner's private page")
     tg.add_argument("--telegram-send-scheduled", action="store_true",
                     help="record the gold price and post whichever scheduled card is due (pulse, key levels, recap, ...)")
     tg.add_argument("--telegram-send-pulse", action="store_true",
@@ -519,6 +521,17 @@ def run_telegram_send(args: argparse.Namespace, settings: Settings, today: date)
         destination_text=f"telegram_channel ({describe_chat(chat_id)}) via telegram", id_label="Telegram message ID")
 
 
+def run_owner_reel_script(args: argparse.Namespace, settings: Settings, today: date) -> int:
+    """The owner's daily reel script, published to a private page. Never posted to a channel."""
+    day = date.fromisoformat(args.date) if args.date else None
+    with open_database(settings) as db:
+        outcome, script, detail = reel_script.run(db, settings, day=day, dry_run=args.dry_run)
+    if script is not None and (args.dry_run or outcome != "SENT"):
+        print(reel_script.render_text(script) + "\n")
+    print(f"Reel script: {outcome} ({detail})")
+    return 1 if outcome == "FAILED" else 0
+
+
 def run_telegram_scheduled(args: argparse.Namespace, settings: Settings, today: date) -> int:
     """Record the gold price and post the scheduled cards that are due. Telegram only."""
     chat_id = telegram_chat_id(settings)
@@ -820,7 +833,7 @@ def main(argv: list[str] | None = None) -> int:
         print("--dry-run and --recheck-released only apply together with --enrich-actuals.", file=sys.stderr)
         return 2
     sending = wants_whatsapp_send(args) or wants_telegram_send(args)
-    if args.dry_run and not (args.enrich_actuals or sending or args.telegram_send_pulse or args.telegram_send_videos or args.telegram_send_scheduled
+    if args.dry_run and not (args.enrich_actuals or sending or args.telegram_send_pulse or args.telegram_send_videos or args.telegram_send_scheduled or args.owner_reel_script
                                  or args.telegram_send_live):
         print("--dry-run and --recheck-released only apply together with --enrich-actuals "
               "(--dry-run also with a --whatsapp-send-... or --telegram-send-... option).", file=sys.stderr)
@@ -844,6 +857,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_telegram_check(settings)
         if args.telegram_test:
             return run_telegram_test(settings)
+        if args.owner_reel_script:
+            return run_owner_reel_script(args, settings, today)
         if args.telegram_send_scheduled:
             return _guarded(run_telegram_scheduled, "TELEGRAM", args, settings, today)
         if args.telegram_send_live:

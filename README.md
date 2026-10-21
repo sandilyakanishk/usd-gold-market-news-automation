@@ -1135,6 +1135,31 @@ roughly 650 of them; the WhatsApp destination check runs only at the start of
 the morning window to leave room for them. If the allowance runs out, the
 WhatsApp copies stop until the next month; Telegram is unaffected.
 
+## Owner's reel script (private page)
+
+Once a day's recap is out (23:35 India time), the bot writes a 45 to 60
+second reel script about that day in Hinglish: the USD releases with their
+figures, how gold moved, and what comes next (`src/reel_script.py`). The AI
+writer (Gemini) writes it; if it cannot, a plain template version is used.
+The same checks as everywhere apply: news and numbers, never buy/sell calls,
+targets or predictions.
+
+The script is never posted to Telegram or WhatsApp. It goes to an owner-only
+page on Vercel (`web/reel-page/index.html`), deployed through Vercel's API.
+The page keeps only the latest script: each deployment replaces the last and
+the older deployments are deleted. The script is encrypted with
+`REEL_PAGE_PASSWORD` (AES-256-GCM, key from PBKDF2-SHA256 with 310,000
+rounds) and decrypted in the browser, so the page address alone reveals
+nothing.
+
+Settings: `VERCEL_TOKEN`, `REEL_PAGE_PASSWORD` (secrets) and optionally
+`REEL_PAGE_PROJECT` (the Vercel project name, default `reel-scripts-owner`).
+Until both secrets are set the step does nothing.
+
+```bash
+python -m src.main --owner-reel-script --dry-run   # show the latest finished day's script
+```
+
 ## Cloud runner (Step 6)
 
 The project runs on GitHub Actions, so it does not need your computer. There

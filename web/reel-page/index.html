@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Reel Script</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --card: #ffffff; --ink: #1d1b16; --muted: #6b665c; --line: #e4dfd4;
+    --accent: #b8860b; --accent-ink: #ffffff; --soft: #fbf3dc; --danger: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #14130f; --card: #1e1c17; --ink: #f1ede4; --muted: #a49d8f; --line: #34312a;
+            --accent: #e0b23c; --accent-ink: #14130f; --soft: #2a2516; --danger: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 680px; margin: 0 auto; padding: 28px 16px 64px; }
+  header { margin-bottom: 20px; }
+  .eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  h1 { font-size: 26px; line-height: 1.25; margin: 6px 0 4px; }
+  .meta { color: var(--muted); font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin: 14px 0; }
+  .card h2 { font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+  .hook { background: var(--soft); border-color: transparent; font-size: 19px; font-weight: 600; }
+  ol { margin: 0; padding-left: 22px; } li { margin: 8px 0; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; font-size: 14px; }
+  .caption { white-space: pre-wrap; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+  button { font: inherit; border: 0; border-radius: 10px; padding: 11px 16px; cursor: pointer;
+           background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  input { font: inherit; width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line);
+          background: var(--card); color: var(--ink); margin: 8px 0 12px; }
+  label.check { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--muted); margin-bottom: 14px; }
+  .error { color: var(--danger); min-height: 1.4em; font-size: 14px; }
+  .hidden { display: none; }
+  .note { color: var(--muted); font-size: 13px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<main>
+  <section id="lock">
+    <header>
+      <div class="eyebrow">Owner only</div>
+      <h1>Daily reel script</h1>
+      <div class="meta">Enter your password to open today's script.</div>
+    </header>
+    <form id="unlock" class="card" autocomplete="off">
+      <label for="password">Password</label>
+      <input id="password" type="password" required autofocus>
+      <label class="check"><input id="remember" type="checkbox" style="width:auto;margin:0"> Remember on this device</label>
+      <button type="submit">Open script</button>
+      <p class="error" id="error" role="alert"></p>
+    </form>
+  </section>
+
+  <section id="script" class="hidden" aria-live="polite">
+    <header>
+      <div class="eyebrow" id="day"></div>
+      <h1 id="title"></h1>
+      <div class="meta" id="generated"></div>
+    </header>
+    <div class="card hook"><h2>Hook</h2><div id="hook"></div></div>
+    <div class="card"><h2>Script</h2><ol id="lines"></ol></div>
+    <div class="card"><h2>On-screen text</h2><div class="chips" id="overlays"></div></div>
+    <div class="card"><h2>Caption</h2><div class="caption" id="caption"></div></div>
+    <div class="actions">
+      <button id="copy-script">Copy script</button>
+      <button id="copy-caption" class="secondary">Copy caption</button>
+      <button id="lock-again" class="secondary">Lock</button>
+    </div>
+    <p class="note">News and numbers only, not trading advice. Only the latest script is kept here.</p>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const b64 = (text) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+  const store = {
+    get() { try { return localStorage.getItem("reel-pw") || sessionStorage.getItem("reel-pw"); } catch (e) { return null; } },
+    set(pw, remember) { try { (remember ? localStorage : sessionStorage).setItem("reel-pw", pw); } catch (e) {} },
+    clear() { try { localStorage.removeItem("reel-pw"); sessionStorage.removeItem("reel-pw"); } catch (e) {} },
+  };
+  let script = null;
+
+  async function open(password) {
+    const response = await fetch("script.json", { cache: "no-store" });
+    if (!response.ok) throw new Error("No script has been published yet.");
+    const sealed = await response.json();
+    const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
+    const key = await crypto.subtle.deriveKey(
+      { name: "PBKDF2", salt: b64(sealed.salt), iterations: sealed.iterations, hash: "SHA-256" },
+      material, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    let plain;
+    try {
+      plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(sealed.iv) }, key, b64(sealed.data));
+    } catch (e) { throw new Error("Wrong password."); }
+    return JSON.parse(new TextDecoder().decode(plain));
+  }
+
+  function show(s) {
+    script = s;
+    const day = new Date(s.day + "T00:00:00");
+    $("day").textContent = "Script for " + day.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
+    $("title").textContent = s.title;
+    $("generated").textContent = "Written " + new Date(s.generated_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
+      + " IST · " + (s.source === "ai" ? "by the AI writer" : "from the template");
+    $("hook").textContent = s.hook;
+    $("lines").replaceChildren(...s.lines.map((line) => Object.assign(document.createElement("li"), { textContent: line })));
+    $("overlays").replaceChildren(...s.on_screen.map((t) => Object.assign(document.createElement("span"), { className: "chip", textContent: t })));
+    $("caption").textContent = s.caption;
+    $("lock").classList.add("hidden");
+    $("script").classList.remove("hidden");
+  }
+
+  async function copy(text, button) {
+    const label = button.textContent;
+    try { await navigator.clipboard.writeText(text); button.textContent = "Copied"; }
+    catch (e) { button.textContent = "Copy failed"; }
+    setTimeout(() => (button.textContent = label), 1500);
+  }
+
+  $("unlock").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    $("error").textContent = "";
+    const password = $("password").value;
+    try { show(await open(password)); store.set(password, $("remember").checked); }
+    catch (e) { $("error").textContent = e.message || "Could not open the script."; }
+  });
+  $("copy-script").addEventListener("click", (e) =>
+    copy([script.hook, ...script.lines].join("\n"), e.currentTarget));
+  $("copy-caption").addEventListener("click", (e) => copy(script.caption, e.currentTarget));
+  $("lock-again").addEventListener("click", () => {
+    store.clear(); script = null; $("password").value = "";
+    $("script").classList.add("hidden"); $("lock").classList.remove("hidden");
+  });
+
+  const saved = store.get();
+  if (saved) open(saved).then(show).catch(() => store.clear());
+})();
+</script>
+</body>
+</html>
