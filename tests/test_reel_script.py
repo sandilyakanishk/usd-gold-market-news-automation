@@ -68,7 +68,8 @@ def test_the_template_version_states_only_facts_in_hinglish(db):
     script = rs.template_script(rs.day_facts(db, DAY, IST, now=ist(DAY, 23, 40)))
     assert script.source == "template" and "21 October" in script.title
     text = " ".join([script.hook, *script.lines])
-    assert "4,100.00" in text and "4,118.00" in text and "upar" in text and "follow" in text.lower()
+    assert "4,100.00" in text and "4,118.00" in text and "upar" in text and "kal ka market" in text
+    assert any(w in text.lower() for w in ("follow", "comment", "save", "share"))
 
 
 def test_the_ai_writes_it_when_it_can_and_its_text_is_checked(db):
@@ -116,7 +117,40 @@ def test_every_forex_factory_release_of_the_day_is_in_the_facts_most_important_f
     assert "Core CPI m/m aaya 0.4%, forecast tha 0.3%" in text and "Building Permits" in text and "forecast 1.39M" in text
     assert text.index("Core CPI") < text.index("Gold ne")                    # the news comes first, then gold
     prompt = rs.build_prompt(facts)
-    assert "Forex Factory" in prompt and "Only if 'actual' is given" in prompt and "Building Permits" in prompt
+    assert "Forex Factory" in prompt and "the result only if 'actual' is given" in prompt and "Building Permits" in prompt
+
+
+def test_the_prompt_follows_the_pattern_and_changes_style_every_day(db):
+    facts = rs.day_facts(db, DAY, IST, now=ist(DAY, 23, 40))
+    assert facts["today"]["date"] == "2026-10-22" and facts["today"]["weekday"] == "Thursday"
+    prompt = rs.build_prompt(facts, ["Kal gold ne sabko chauka diya"])
+    for part in ("1. HOOK", "2. YESTERDAY'S MARKET", "3. WHAT IT CAN MEAN FOR TODAY", "4. CALL TO ACTION"):
+        assert part in prompt
+    assert "conditional terms only" in prompt and "Kal gold ne sabko chauka diya" in prompt
+    styles = {rs.build_prompt({**facts, "day": (DAY + timedelta(days=d)).isoformat()}).split("in this style: ")[1].split(".")[0]
+              for d in range(10)}
+    assert len(styles) == 10                                              # ten days, ten different kinds of hook
+
+
+def test_a_hook_that_opens_like_a_recent_one_is_not_used(db):
+    facts = rs.day_facts(db, DAY, IST, now=ist(DAY, 23, 40))
+    config = SimpleNamespace(**{**vars(SETTINGS), "gemini_api_key": "k"})
+    repeat = {**GOOD_AI, "lines": GOOD_AI["lines"] + ["Comment karo aaj kya lagta hai."]}
+    script = rs.write_script(facts, config, ask=lambda *a, **k: repeat, recent_hooks=["Kal US CPI aaya aur sab hil gaya"])
+    assert script.source == "template"                                   # same first four words as a recent hook
+    fresh = rs.write_script(facts, config, ask=lambda *a, **k: repeat, recent_hooks=["Aaj ka gold kuch alag hai"])
+    assert fresh.source == "ai"
+
+
+def test_hooks_are_remembered_between_days_and_templates_vary_too(db):
+    log = []
+    rs.run(db, SETTINGS, now=ist(DAY, 23, 40), environ={"VERCEL_TOKEN": "t"}, call=fake_vercel(log))
+    rs.run(db, SETTINGS, now=ist(DAY + timedelta(days=1), 23, 40), environ={"VERCEL_TOKEN": "t"}, call=fake_vercel(log))
+    remembered = json.loads(db.get_content_state(rs.HOOK_MEMORY)["recent"])["recent"]
+    assert len(remembered) == 2 and remembered[0] != remembered[1]
+    hooks = {rs.template_script({"day": (DAY + timedelta(days=d)).isoformat(), "gold": None, "releases": [], "coming_up": []}).hook
+             for d in range(5)}
+    assert len(hooks) == 5
 
 
 # -- the private page ----------------------------------------------------------------------

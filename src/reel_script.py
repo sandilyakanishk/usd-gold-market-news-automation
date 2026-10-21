@@ -50,6 +50,7 @@ PAGE_DIR = PROJECT_ROOT / "web" / "reel-page"
 VERCEL_API = "https://api.vercel.com"
 PBKDF2_ROUNDS = 310_000
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
+HOOK_MEMORY = "reel_hooks"  # content_state row remembering the last hooks used
 
 # Reports news; never advises. Explaining what a release is remains fine.
 _FORBIDDEN = re.compile(
@@ -113,29 +114,85 @@ def day_facts(db: EventRepository, day: date, tz: ZoneInfo | timezone, *, now: d
         gold = {"open": round(summary["open"], 2), "high": round(summary["high"], 2), "low": round(summary["low"], 2),
                 "close": round(summary["close"], 2), "change": round(change, 2),
                 "change_percent": round(change / summary["open"] * 100, 2) if summary["open"] else 0.0}
-    ahead = []
-    for event in cards.week_ahead_events(db, day)[:6]:
-        ahead.append({"name": event.event_name, "date": event.date, "time": event.time, "impact": event.impact})
-    return {"day": day.isoformat(), "weekday": day.strftime("%A"), "releases": releases, "gold": gold, "coming_up": ahead}
+    # The reel is watched the morning after: the next day's releases are "today" for the viewer.
+    next_day = day + timedelta(days=1)
+    today_items = load_enriched(db, now=now, currency="USD", date_from=next_day.isoformat(), date_to=next_day.isoformat())
+    today = []
+    for item in sorted(today_items, key=lambda i: (rank.get(i.event.impact, 3), i.event.time or "", i.event.event_name)):
+        e, c = item.event, item.classification
+        today.append({"name": e.event_name, "time_ist": _clock(e.time), "impact": e.impact, "forecast": e.forecast,
+                      "previous": e.previous, "why_it_matters": c.gold_relevance_reason if c else None})
+    later = [{"name": e.event_name, "date": e.date, "time_ist": _clock(e.time), "impact": e.impact}
+             for e in cards.week_ahead_events(db, next_day)[:4]]
+    return {"day": day.isoformat(), "weekday": day.strftime("%A"), "releases": releases, "gold": gold,
+            "today": {"date": next_day.isoformat(), "weekday": next_day.strftime("%A"), "releases": today},
+            "coming_up": later}
 
 
 # -- writing the script ---------------------------------------------------------------------
 
-def build_prompt(facts: dict) -> str:
-    return "\n".join([
+# Each day gets a different kind of hook and a different delivery, so no two scripts sound alike.
+HOOK_STYLES = (
+    "a sharp question to the viewer",
+    "one striking number from yesterday, said first",
+    "a bold, curiosity-raising statement",
+    "a common trader mistake and why it hurts",
+    "a 'most traders missed this' angle",
+    "a short scene, as if telling a friend what happened yesterday",
+    "a myth versus reality contrast",
+    "a challenge: 'can you guess what happened yesterday?'",
+    "a countdown to today's key release",
+    "a 'before you place a trade today' warning",
+)
+DELIVERY_STYLES = (
+    "fast and energetic, short punchy lines",
+    "calm and clear like a teacher explaining to a beginner",
+    "storytelling, one thing leading to the next",
+    "conversational, like talking to a friend over chai",
+    "crisp news-anchor style",
+    "coach style: direct, practical, a little tough",
+)
+CTA_STYLES = (
+    "ask them to follow for tomorrow's update",
+    "ask them to comment what they expect today",
+    "ask them to save the reel for later",
+    "ask them to share it with a trader friend",
+    "ask them to turn on notifications for the live session",
+)
+
+
+def _pick(options: tuple, day: date, offset: int = 0) -> str:
+    return options[(day.toordinal() + offset) % len(options)]
+
+
+def build_prompt(facts: dict, recent_hooks: list[str] | None = None) -> str:
+    day = date.fromisoformat(facts["day"])
+    lines = [
         "You write a short Instagram/YouTube reel script for a gold (XAU/USD) and forex trading creator in India.",
         "Write it in natural Hinglish: Hindi words in Roman script mixed with English, the way young Indian traders speak.",
-        "It must be spoken in about 45 to 60 seconds. Build it around the day's US economic news from the Forex Factory",
-        "calendar (the 'releases' list): hook on the most important release, then go through the releases, saying what each",
-        "one measures and its forecast and previous figures. Only if 'actual' is given may you say what the figure came in at;",
-        "otherwise do not claim any result. After the news, one or two lines on how gold moved that day (the 'gold' figures),",
-        "then one line about what is coming next ('coming_up'), then a call to follow the page.",
+        "The viewer watches it the next morning, so 'yesterday' is the day in 'releases' and 'gold', and 'today' is 'today'.",
+        "It must be spoken in about 45 to 60 seconds, in exactly this order:",
+        f"1. HOOK: one line, in this style: {_pick(HOOK_STYLES, day)}. Make it fresh: it must not resemble any recent hook.",
+        "2. YESTERDAY'S MARKET: the US releases from the Forex Factory calendar ('releases': what each measures, forecast,",
+        "   previous; the result only if 'actual' is given) and how gold moved ('gold': open, high, low, close, change).",
+        "3. WHAT IT CAN MEAN FOR TODAY: link yesterday to today. Name today's releases ('today') with their times and what",
+        "   to watch. Explain the usual reaction in conditional terms only, for example 'agar figure forecast se upar aaya to",
+        "   dollar strong ho sakta hai aur gold par pressure aa sakta hai'. If 'today' has no releases, say it is a quieter",
+        "   news day and what that usually means. Never state as fact where gold or the dollar will go.",
+        f"4. CALL TO ACTION: {_pick(CTA_STYLES, day, 3)}.",
+        f"Delivery: {_pick(DELIVERY_STYLES, day, 5)}. Vary sentence openings; avoid stock phrases like 'Dosto' or",
+        "'chalo jaldi se' at the start, and do not reuse the structure or wording of an ordinary news recap.",
         "Use ONLY the facts below; never invent numbers, times, results or events.",
         "Strict rules: this is news, not advice. Never tell viewers to buy or sell, never give entries, targets or stop-losses,",
-        "never say where gold or the dollar will go. Explaining why a figure matters for the dollar or gold is fine.",
+        "never promise a move. Conditional explanations of how markets usually react are fine.",
         "No hashtags inside the spoken lines. No emojis in the spoken lines.",
+    ]
+    if recent_hooks:
+        lines.append("Recent hooks you must not repeat or imitate: " + " | ".join(h[:100] for h in recent_hooks[-10:]))
+    return "\n".join(lines + [
         'Reply with JSON only: {"title": "...", "hook": "...", "lines": ["...", "..."], "on_screen": ["...", "..."], "caption": "..."}',
-        "title: under 60 characters. hook: one spoken sentence. lines: 5 to 9 short spoken lines after the hook.",
+        "title: under 60 characters. hook: one spoken sentence. lines: 6 to 10 short spoken lines after the hook,",
+        "covering parts 2, 3 and 4 in order.",
         "on_screen: 3 to 6 very short text overlays. caption: under 300 characters, may end with up to 5 hashtags.",
         "Facts (JSON): " + json.dumps(facts, ensure_ascii=False),
     ])
@@ -178,7 +235,8 @@ def template_script(facts: dict) -> ReelScript:
     day = date.fromisoformat(facts["day"])
     label = f"{day.day} {day.strftime('%B')}"
     gold, releases, ahead = facts.get("gold"), facts.get("releases") or [], facts.get("coming_up") or []
-    lines = []
+    today = (facts.get("today") or {}).get("releases") or []
+    lines = ["Pehle dekhte hain kal ka market."]
     released = [r for r in releases if r.get("actual")]
     for r in releases[:4]:
         if r.get("actual"):
@@ -189,16 +247,22 @@ def template_script(facts: dict) -> ReelScript:
             figures = ", ".join(f for f in figures if f)
             lines.append(f"{r['time_ist']} IST par {r['name']} ({r['impact'].lower()} impact)" + (f": {figures}." if figures else "."))
     if not releases:
-        lines.append("Forex Factory par aaj US ka koi data release nahi tha.")
+        lines.append("Kal Forex Factory par US ka koi data release nahi tha.")
     if gold:
         direction = "upar" if gold["change"] > 0 else "neeche" if gold["change"] < 0 else "flat"
         lines.append(f"Gold ne din ki shuruaat ki {gold['open']:,.2f} dollar par.")
         lines.append(f"High bana {gold['high']:,.2f} aur low {gold['low']:,.2f}.")
         lines.append(f"Din khatam hua {gold['close']:,.2f} par, yaani {abs(gold['change']):,.2f} dollar {direction}.")
-    if ahead:
-        nxt = ahead[0]
-        lines.append(f"Aage dhyaan rakho: {nxt['name']}, {_clock(nxt.get('time'))} IST.")
-    lines.append("Aise hi daily gold aur dollar updates ke liye page ko follow karo.")
+    if today:
+        key = today[0]
+        figures = f", forecast {key['forecast']}" if key.get("forecast") else ""
+        lines.append(f"Aaj sabse important hai {key['name']}, {key['time_ist']} IST par{figures}.")
+        lines.append("Agar figure forecast se kaafi alag aaya, to dollar aur gold dono mein tez move aa sakta hai.")
+    elif ahead:
+        lines.append(f"Aaj US ka bada data nahi hai; agla important release hai {ahead[0]['name']}.")
+        lines.append("Aise quiet din par gold aksar kal ke range ke aas-paas hi rehta hai, par surprise kabhi bhi aa sakta hai.")
+    lines.append(_pick(("Kal ka update chahiye to follow kar lo.", "Comment mein batao aaj tumhe kya lagta hai.",
+                        "Ye reel save kar lo, trade se pehle kaam aayegi.", "Kisi trader dost ko share karo."), day))
     while len(lines) < 4:
         lines.insert(-1, "Market mein volatility news ke time sabse zyada hoti hai, isliye calendar check karte raho.")
     overlays = [f"USD NEWS · {label}"]
@@ -211,18 +275,31 @@ def template_script(facts: dict) -> ReelScript:
     overlays.append("Follow for daily updates")
     return validate({
         "title": f"Gold aur USD news · {label}",
-        "hook": f"{label} ko gold aur dollar mein kya hua? 50 second mein samjho.",
+        "hook": _pick((f"{label} ko gold ne kya kiya, aur aaj uska kya matlab hai?",
+                       f"Aaj trade lene se pehle kal ka ye data zaroor jaan lo.",
+                       f"Kal market mein jo hua, wahi aaj ka mood set kar sakta hai.",
+                       f"Ek minute mein kal ka gold aur dollar, aur aaj kya dekhna hai.",
+                       f"Kal ke US data ne gold ko kahan chhoda? Dekho aur aaj ke liye ready raho."), day),
         "lines": lines[:10], "on_screen": overlays[:7],
         "caption": f"{label} ka USD news aur gold recap. Sirf information, trading advice nahi. #gold #xauusd #forex #usd",
     }, facts["day"], "template")
 
 
-def write_script(facts: dict, settings: Settings, *, ask=content_cards.ask_gemini) -> ReelScript:
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def write_script(facts: dict, settings: Settings, *, ask=content_cards.ask_gemini, recent_hooks: list[str] | None = None) -> ReelScript:
     """The AI's script if it is fit to use, otherwise the template version."""
+    recent_hooks = recent_hooks or []
     if getattr(settings, "gemini_api_key", None):
         try:
-            raw = content_cards.ask_any_model(build_prompt(facts), settings, ask=ask)
-            return validate(raw, facts["day"], "ai")
+            raw = content_cards.ask_any_model(build_prompt(facts, recent_hooks), settings, ask=ask)
+            script = validate(raw, facts["day"], "ai")
+            opening = " ".join(_norm(script.hook).split()[:4])
+            if any(opening and opening == " ".join(_norm(h).split()[:4]) for h in recent_hooks):
+                raise ReelScriptError("the hook opens like a recent one")
+            return script
         except (content_cards.ContentError, ReelScriptError) as exc:
             log.warning("Reel script: the AI's version was not used (%s); using the template.", exc)
     return template_script(facts)
@@ -326,7 +403,12 @@ def run(db: EventRepository, settings: Settings, *, now: datetime | None = None,
     if not dry_run and not token:
         # Checked before asking the AI, so an unconfigured page costs nothing on every run.
         return "NOT_CONFIGURED", None, "VERCEL_TOKEN is not set"
-    script = write_script(day_facts(db, day, tz, now=now), settings, ask=ask)
+    memory = db.get_content_state(HOOK_MEMORY)
+    try:
+        recent_hooks = list(json.loads(memory["recent"]).get("recent", [])) if memory else []
+    except (ValueError, TypeError, AttributeError):
+        recent_hooks = []
+    script = write_script(day_facts(db, day, tz, now=now), settings, ask=ask, recent_hooks=recent_hooks)
     if dry_run:
         return "DRY_RUN", script, "nothing was published"
     stamp = now.strftime(STAMP)
@@ -341,6 +423,7 @@ def run(db: EventRepository, settings: Settings, *, now: datetime | None = None,
         return "FAILED", script, str(exc)
     record.status, record.sent_at, record.provider_message_id = SENT, stamp, address
     db.save_delivery(record)
+    db.save_content_state(HOOK_MEMORY, 0, json.dumps({"recent": (recent_hooks + [script.hook])[-30:]}, ensure_ascii=False), stamp)
     return "SENT", script, f"{address} (older versions removed: {deleted})"
 
 
