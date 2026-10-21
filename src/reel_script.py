@@ -88,15 +88,17 @@ def target_day(now: datetime, tz: ZoneInfo | timezone) -> date:
 
 def day_facts(db: EventRepository, day: date, tz: ZoneInfo | timezone, *, now: datetime) -> dict:
     """Everything the script may say, from stored data only."""
+    # Every USD event Forex Factory listed for the day, most important first. A quiet day's minor releases are
+    # still the day's news, so none is left out.
     items = load_enriched(db, now=now, currency="USD", date_from=day.isoformat(), date_to=day.isoformat())
+    rank = {"High": 0, "Medium": 1, "Low": 2}
     releases = []
-    for item in items:
+    for item in sorted(items, key=lambda i: (rank.get(i.event.impact, 3), i.event.time or "", i.event.event_name)):
         e, c = item.event, item.classification
-        if e.impact not in ("High", "Medium") and not (c and c.priority in ("CRITICAL", "HIGH", "MEDIUM")):
-            continue
         releases.append({
-            "name": e.event_name, "time": e.time, "impact": e.impact, "forecast": e.forecast, "previous": e.previous,
-            "actual": e.actual, "result": item.record.surprise_status if e.actual else None,
+            "name": e.event_name, "time_ist": _clock(e.time), "impact": e.impact, "forecast": e.forecast,
+            "previous": e.previous, "actual": e.actual, "result": item.record.surprise_status if e.actual else None,
+            "category": c.category if c else None, "why_it_matters": c.gold_relevance_reason if c else None,
         })
     start, end = cards.day_bounds(day, tz)
     summary = cards.summarize(db.price_snapshots_between(cards.SYMBOL, start, end))
@@ -122,8 +124,12 @@ def build_prompt(facts: dict) -> str:
     return "\n".join([
         "You write a short Instagram/YouTube reel script for a gold (XAU/USD) and forex trading creator in India.",
         "Write it in natural Hinglish: Hindi words in Roman script mixed with English, the way young Indian traders speak.",
-        "It must be spoken in about 45 to 60 seconds: a strong hook, then the facts, then one line about what is coming next,",
-        "then a call to follow the page. Use ONLY the facts below; never invent numbers, times or events.",
+        "It must be spoken in about 45 to 60 seconds. Build it around the day's US economic news from the Forex Factory",
+        "calendar (the 'releases' list): hook on the most important release, then go through the releases, saying what each",
+        "one measures and its forecast and previous figures. Only if 'actual' is given may you say what the figure came in at;",
+        "otherwise do not claim any result. After the news, one or two lines on how gold moved that day (the 'gold' figures),",
+        "then one line about what is coming next ('coming_up'), then a call to follow the page.",
+        "Use ONLY the facts below; never invent numbers, times, results or events.",
         "Strict rules: this is news, not advice. Never tell viewers to buy or sell, never give entries, targets or stop-losses,",
         "never say where gold or the dollar will go. Explaining why a figure matters for the dollar or gold is fine.",
         "No hashtags inside the spoken lines. No emojis in the spoken lines.",
@@ -173,14 +179,16 @@ def template_script(facts: dict) -> ReelScript:
     gold, releases, ahead = facts.get("gold"), facts.get("releases") or [], facts.get("coming_up") or []
     lines = []
     released = [r for r in releases if r.get("actual")]
-    if released:
-        for r in released[:3]:
+    for r in releases[:4]:
+        if r.get("actual"):
             versus = f", forecast tha {r['forecast']}" if r.get("forecast") else ""
             lines.append(f"{r['name']} aaya {r['actual']}{versus}.")
-    elif releases:
-        lines.append("Aaj ke US data: " + ", ".join(r["name"] for r in releases[:3]) + ".")
-    else:
-        lines.append("Aaj US ka koi bada data release nahi tha.")
+        else:
+            figures = [f"forecast {r['forecast']}" if r.get("forecast") else "", f"previous {r['previous']}" if r.get("previous") else ""]
+            figures = ", ".join(f for f in figures if f)
+            lines.append(f"{r['time_ist']} IST par {r['name']} ({r['impact'].lower()} impact)" + (f": {figures}." if figures else "."))
+    if not releases:
+        lines.append("Forex Factory par aaj US ka koi data release nahi tha.")
     if gold:
         direction = "upar" if gold["change"] > 0 else "neeche" if gold["change"] < 0 else "flat"
         lines.append(f"Gold ne din ki shuruaat ki {gold['open']:,.2f} dollar par.")
@@ -197,6 +205,8 @@ def template_script(facts: dict) -> ReelScript:
         overlays.append(f"Gold: {gold['close']:,.2f} ({gold['change']:+,.2f})")
     if released:
         overlays.append(f"{released[0]['name']}: {released[0]['actual']}")
+    elif releases:
+        overlays.append(f"{len(releases)} US releases")
     overlays.append("Follow for daily updates")
     return validate({
         "title": f"Gold aur USD news · {label}",

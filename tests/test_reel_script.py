@@ -94,6 +94,31 @@ def test_advice_and_predictions_are_refused(line):
         rs.validate({**GOOD_AI, "lines": GOOD_AI["lines"][:4] + [line]}, "2026-10-21", "ai")
 
 
+def test_every_forex_factory_release_of_the_day_is_in_the_facts_most_important_first(db):
+    from src.collector.models import Event
+    stamp = "2026-10-21T00:00:00Z"
+
+    def event(name, hhmm, impact, forecast=None, previous=None, actual=None):
+        hour, minute = (int(x) for x in hhmm.split(":"))
+        utc = ist(DAY, hour, minute).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return Event(event_id="ff-" + name.replace(" ", "")[:12].lower(), date=DAY.isoformat(), time=hhmm, timezone="Asia/Kolkata",
+                     datetime_utc=utc, currency="USD", event_name=name, impact=impact, original_impact=impact, gold_relevance=False,
+                     forecast=forecast, previous=previous, actual=actual, source="forexfactory", source_url="https://example.test",
+                     retrieved_at=stamp, updated_at=stamp)
+    db.upsert_events([event("Building Permits", "18:00", "Low", "1.39M", "1.39M"), event("Housing Starts", "18:00", "Low", "1.30M", "1.28M"),
+                      event("Crude Oil Inventories", "20:00", "Low", "-0.1M", "-8.6M"), event("Core CPI m/m", "18:00", "High", "0.3%", "0.2%", "0.4%")])
+    facts = rs.day_facts(db, DAY, IST, now=ist(DAY, 23, 40))
+    assert [r["name"] for r in facts["releases"]] == ["Core CPI m/m", "Building Permits", "Housing Starts", "Crude Oil Inventories"]
+    cpi = facts["releases"][0]
+    assert (cpi["time_ist"], cpi["actual"], cpi["forecast"], cpi["previous"]) == ("6:00 PM", "0.4%", "0.3%", "0.2%")
+    script = rs.template_script(facts)
+    text = " ".join(script.lines)
+    assert "Core CPI m/m aaya 0.4%, forecast tha 0.3%" in text and "Building Permits" in text and "forecast 1.39M" in text
+    assert text.index("Core CPI") < text.index("Gold ne")                    # the news comes first, then gold
+    prompt = rs.build_prompt(facts)
+    assert "Forex Factory" in prompt and "Only if 'actual' is given" in prompt and "Building Permits" in prompt
+
+
 # -- the private page ----------------------------------------------------------------------
 
 def test_the_script_is_encrypted_and_opens_only_with_the_password():
