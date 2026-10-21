@@ -51,6 +51,8 @@ VERCEL_API = "https://api.vercel.com"
 PBKDF2_ROUNDS = 310_000
 STAMP = "%Y-%m-%dT%H:%M:%SZ"
 HOOK_MEMORY = "reel_hooks"  # content_state row remembering the last hooks used
+# A one-minute reel spoken at a natural Hinglish pace.
+MIN_WORDS, MAX_WORDS = 150, 190
 
 # Reports news; never advises. Explaining what a release is remains fine.
 _FORBIDDEN = re.compile(
@@ -171,7 +173,7 @@ def build_prompt(facts: dict, recent_hooks: list[str] | None = None) -> str:
         "You write a short Instagram/YouTube reel script for a gold (XAU/USD) and forex trading creator in India.",
         "Write it in natural Hinglish: Hindi words in Roman script mixed with English, the way young Indian traders speak.",
         "The viewer watches it the next morning, so 'yesterday' is the day in 'releases' and 'gold', and 'today' is 'today'.",
-        "It must be spoken in about 45 to 60 seconds, in exactly this order:",
+        f"It is a full ONE-MINUTE reel: {MIN_WORDS} to {MAX_WORDS} spoken words in total (hook plus lines), in exactly this order:",
         f"1. HOOK: one line, in this style: {_pick(HOOK_STYLES, day)}. Make it fresh: it must not resemble any recent hook.",
         "2. YESTERDAY'S MARKET: the US releases from the Forex Factory calendar ('releases': what each measures, forecast,",
         "   previous; the result only if 'actual' is given) and how gold moved ('gold': open, high, low, close, change).",
@@ -191,8 +193,9 @@ def build_prompt(facts: dict, recent_hooks: list[str] | None = None) -> str:
         lines.append("Recent hooks you must not repeat or imitate: " + " | ".join(h[:100] for h in recent_hooks[-10:]))
     return "\n".join(lines + [
         'Reply with JSON only: {"title": "...", "hook": "...", "lines": ["...", "..."], "on_screen": ["...", "..."], "caption": "..."}',
-        "title: under 60 characters. hook: one spoken sentence. lines: 6 to 10 short spoken lines after the hook,",
-        "covering parts 2, 3 and 4 in order.",
+        "title: under 60 characters. hook: one spoken sentence. lines: 10 to 14 spoken lines after the hook,",
+        "covering parts 2, 3 and 4 in order; give part 2 and part 3 about equal time, and explain each release in a sentence",
+        "or two (what it measures and why traders care) so the reel fills the full minute.",
         "on_screen: 3 to 6 very short text overlays. caption: under 300 characters, may end with up to 5 hashtags.",
         "Facts (JSON): " + json.dumps(facts, ensure_ascii=False),
     ])
@@ -213,14 +216,21 @@ def validate(raw: object, day: str, source: str) -> ReelScript:
     if not isinstance(raw, dict):
         raise ReelScriptError("the script is not an object")
     lines, overlays = raw.get("lines"), raw.get("on_screen")
-    if not isinstance(lines, list) or not (4 <= len(lines) <= 10):
-        raise ReelScriptError("the script needs 4 to 10 spoken lines")
+    if not isinstance(lines, list) or not (4 <= len(lines) <= 16):
+        raise ReelScriptError("the script needs 4 to 16 spoken lines")
     if not isinstance(overlays, list) or not (2 <= len(overlays) <= 7):
         raise ReelScriptError("the script needs 2 to 7 on-screen texts")
-    return ReelScript(
+    script = ReelScript(
         day=day, title=_text(raw.get("title"), "the title", 80), hook=_text(raw.get("hook"), "the hook", 220, 10),
         lines=[_text(line, "a line", 260, 5) for line in lines], on_screen=[_text(o, "an on-screen text", 70, 2) for o in overlays],
         caption=_text(raw.get("caption"), "the caption", 400, 10), source=source)
+    if source == "ai" and not (MIN_WORDS <= spoken_words(script) <= MAX_WORDS + 40):
+        raise ReelScriptError(f"the script has {spoken_words(script)} spoken words; a one-minute reel needs {MIN_WORDS} to {MAX_WORDS}")
+    return script
+
+
+def spoken_words(script: ReelScript) -> int:
+    return len(" ".join([script.hook, *script.lines]).split())
 
 
 def _clock(hhmm: str | None) -> str:
@@ -261,6 +271,12 @@ def template_script(facts: dict) -> ReelScript:
     elif ahead:
         lines.append(f"Aaj US ka bada data nahi hai; agla important release hai {ahead[0]['name']}.")
         lines.append("Aise quiet din par gold aksar kal ke range ke aas-paas hi rehta hai, par surprise kabhi bhi aa sakta hai.")
+    # Explaining lines so the plain version also fills about a minute.
+    lines += [
+        "Yaad rakho, market sirf number par nahi, forecast aur actual ke farak par react karta hai.",
+        "Isliye release se pehle aur baad ke kuch minute sabse zyada volatile hote hain.",
+        "Spread bhi us waqt badh sakta hai, to apna risk pehle se plan karke rakho.",
+    ]
     lines.append(_pick(("Kal ka update chahiye to follow kar lo.", "Comment mein batao aaj tumhe kya lagta hai.",
                         "Ye reel save kar lo, trade se pehle kaam aayegi.", "Kisi trader dost ko share karo."), day))
     while len(lines) < 4:
@@ -280,7 +296,7 @@ def template_script(facts: dict) -> ReelScript:
                        f"Kal market mein jo hua, wahi aaj ka mood set kar sakta hai.",
                        f"Ek minute mein kal ka gold aur dollar, aur aaj kya dekhna hai.",
                        f"Kal ke US data ne gold ko kahan chhoda? Dekho aur aaj ke liye ready raho."), day),
-        "lines": lines[:10], "on_screen": overlays[:7],
+        "lines": lines[:16], "on_screen": overlays[:7],
         "caption": f"{label} ka USD news aur gold recap. Sirf information, trading advice nahi. #gold #xauusd #forex #usd",
     }, facts["day"], "template")
 

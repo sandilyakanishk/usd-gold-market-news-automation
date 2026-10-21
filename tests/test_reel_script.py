@@ -44,7 +44,8 @@ def fake_vercel(log):
 
 GOOD_AI = {"title": "CPI ne gold ko hila diya", "hook": "Kal US CPI aaya aur gold mein bada move dikha.",
            "lines": ["CPI aaya 0.4 percent, forecast tha 0.3.", "Dollar mazboot hua.", "Gold 4,090 tak gaya.",
-                     "Phir 4,118 par close hua.", "Kal Retail Sales aayenge, dhyaan rakhna."],
+                     "Phir 4,118 par close hua.", "Kal Retail Sales aayenge, dhyaan rakhna."]
+           + ["Ye line script ko ek poore minute tak le jaane ke liye thodi lambi rakhi gayi hai taaki words poore hon."] * 9,
            "on_screen": ["US CPI 0.4%", "Gold close 4,118"], "caption": "Kal ka USD news aur gold recap. Sirf information. #gold"}
 
 
@@ -232,3 +233,16 @@ def test_a_failed_publish_is_recorded_and_retried(db):
 def test_dry_run_publishes_nothing(db):
     outcome, script, _ = rs.run(db, SETTINGS, now=ist(DAY, 23, 40), dry_run=True, environ={})
     assert outcome == "DRY_RUN" and script is not None and db.count_deliveries() == 0
+
+
+def test_an_ai_script_must_fill_a_whole_minute():
+    short = {**GOOD_AI, "lines": GOOD_AI["lines"][:5]}
+    with pytest.raises(rs.ReelScriptError, match="one-minute reel"):
+        rs.validate(short, "2026-10-21", "ai")
+    script = rs.validate(GOOD_AI, "2026-10-21", "ai")
+    assert rs.MIN_WORDS <= rs.spoken_words(script) <= rs.MAX_WORDS + 40
+
+
+def test_the_template_version_is_close_to_a_minute_too(db):
+    script = rs.template_script(rs.day_facts(db, DAY, IST, now=ist(DAY, 23, 40)))
+    assert rs.spoken_words(script) >= 100
