@@ -8,11 +8,12 @@ and what comes next. Google Gemini writes it in Hinglish; if the AI is not
 available, a plain template version is used instead, so there is always a
 script.
 
-The script goes to one place only: an owner-only page on Vercel. It is never
+The script goes to one place only: the owner's page on Vercel. It is never
 posted to Telegram or WhatsApp. The page holds only the latest script, so the
-previous day's disappears when the new one arrives, and the script is
-encrypted with the owner's password (AES-GCM, key derived with PBKDF2): the
-page is public, its content is readable only with the password.
+previous day's disappears when the new one arrives. The page opens without a
+password and is kept out of search engines; anyone given its address can
+read it. Setting REEL_PAGE_PASSWORD instead encrypts the script (AES-GCM, key
+derived with PBKDF2) so that the page asks for that password.
 
 Like every card, the script reports news and numbers. It never tells anyone
 to buy or sell, and never says where the price will go.
@@ -253,12 +254,13 @@ def decrypt(sealed: dict, password: str) -> dict:
     return json.loads(AESGCM(key).decrypt(raw("iv"), raw("data"), None))
 
 
-def site_files(script: ReelScript, password: str, generated_at: datetime) -> dict[str, str]:
-    """The page and its one data file. The page itself carries no script and no secret."""
+def site_files(script: ReelScript, password: str | None, generated_at: datetime) -> dict[str, str]:
+    """The page and its one data file: the script as it is, or encrypted when a password is set."""
     payload = {**script.to_dict(), "generated_at": generated_at.astimezone(timezone.utc).strftime(STAMP)}
+    data = encrypt(payload, password) if password else {"v": 0, "plain": payload}
     return {
         "index.html": (PAGE_DIR / "index.html").read_text(encoding="utf-8"),
-        "script.json": json.dumps(encrypt(payload, password)),
+        "script.json": json.dumps(data, ensure_ascii=False),
         "robots.txt": "User-agent: *\nDisallow: /\n",
     }
 
@@ -321,9 +323,9 @@ def run(db: EventRepository, settings: Settings, *, now: datetime | None = None,
         return "ALREADY_SENT", None, f"the {day.isoformat()} script is already on the page"
     token, password = (env.get("VERCEL_TOKEN") or "").strip(), (env.get("REEL_PAGE_PASSWORD") or "").strip()
     project = (env.get("REEL_PAGE_PROJECT") or "reel-scripts-owner").strip()
-    if not dry_run and (not token or not password):
+    if not dry_run and not token:
         # Checked before asking the AI, so an unconfigured page costs nothing on every run.
-        return "NOT_CONFIGURED", None, "VERCEL_TOKEN and REEL_PAGE_PASSWORD must both be set"
+        return "NOT_CONFIGURED", None, "VERCEL_TOKEN is not set"
     script = write_script(day_facts(db, day, tz, now=now), settings, ask=ask)
     if dry_run:
         return "DRY_RUN", script, "nothing was published"
@@ -332,7 +334,7 @@ def run(db: EventRepository, settings: Settings, *, now: datetime | None = None,
                             message_type=MESSAGE_TYPE, status=FAILED, attempts=(existing.attempts + 1) if existing else 1,
                             created_at=existing.created_at if existing else stamp, updated_at=stamp)
     try:
-        address, deleted = publish(site_files(script, password, now), token, project, call=call)
+        address, deleted = publish(site_files(script, password or None, now), token, project, call=call)
     except ReelScriptError as exc:
         record.error = str(exc)
         db.save_delivery(record)

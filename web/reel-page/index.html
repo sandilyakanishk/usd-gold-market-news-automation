@@ -43,11 +43,11 @@
 </head>
 <body>
 <main>
-  <section id="lock">
+  <section id="lock" class="hidden">
     <header>
       <div class="eyebrow">Owner only</div>
       <h1>Daily reel script</h1>
-      <div class="meta">Enter your password to open today's script.</div>
+      <div class="meta">This page is password protected. Enter the password to open the script.</div>
     </header>
     <form id="unlock" class="card" autocomplete="off">
       <label for="password">Password</label>
@@ -73,7 +73,7 @@
       <button id="copy-caption" class="secondary">Copy caption</button>
       <button id="lock-again" class="secondary">Lock</button>
     </div>
-    <p class="note">News and numbers only, not trading advice. Only the latest script is kept here.</p>
+    <p class="note">News and numbers only, not trading advice. Only the latest script is kept here; it is replaced every night after the recap.</p>
   </section>
 </main>
 <script>
@@ -87,10 +87,14 @@
   };
   let script = null;
 
-  async function open(password) {
+  async function load() {
     const response = await fetch("script.json", { cache: "no-store" });
     if (!response.ok) throw new Error("No script has been published yet.");
-    const sealed = await response.json();
+    return response.json();
+  }
+
+  async function open(password) {
+    const sealed = await load();
     const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
     const key = await crypto.subtle.deriveKey(
       { name: "PBKDF2", salt: b64(sealed.salt), iterations: sealed.iterations, hash: "SHA-256" },
@@ -139,8 +143,17 @@
     $("script").classList.add("hidden"); $("lock").classList.remove("hidden");
   });
 
-  const saved = store.get();
-  if (saved) open(saved).then(show).catch(() => store.clear());
+  // Shown straight away unless the script was published encrypted.
+  load().then((data) => {
+    if (data.plain) { show(data.plain); $("lock-again").classList.add("hidden"); return; }
+    $("lock").classList.remove("hidden");
+    const saved = store.get();
+    if (saved) open(saved).then(show).catch(() => store.clear());
+  }).catch((e) => {
+    $("lock").classList.remove("hidden");
+    $("unlock").classList.add("hidden");
+    $("lock").querySelector(".meta").textContent = e.message || "No script has been published yet.";
+  });
 })();
 </script>
 </body>

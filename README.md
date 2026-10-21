@@ -1144,17 +1144,19 @@ writer (Gemini) writes it; if it cannot, a plain template version is used.
 The same checks as everywhere apply: news and numbers, never buy/sell calls,
 targets or predictions.
 
-The script is never posted to Telegram or WhatsApp. It goes to an owner-only
+The script is never posted to Telegram or WhatsApp. It goes to the owner's
 page on Vercel (`web/reel-page/index.html`), deployed through Vercel's API.
 The page keeps only the latest script: each deployment replaces the last and
-the older deployments are deleted. The script is encrypted with
-`REEL_PAGE_PASSWORD` (AES-256-GCM, key from PBKDF2-SHA256 with 310,000
-rounds) and decrypted in the browser, so the page address alone reveals
-nothing.
+the older deployments are deleted. By the owner's choice the page opens
+without a password; it is kept out of search engines (`noindex`,
+`robots.txt`) but anyone given its address can read it. If
+`REEL_PAGE_PASSWORD` is set, the script is instead encrypted with it
+(AES-256-GCM, key from PBKDF2-SHA256 with 310,000 rounds) and the page asks
+for the password.
 
-Settings: `VERCEL_TOKEN`, `REEL_PAGE_PASSWORD` (secrets) and optionally
-`REEL_PAGE_PROJECT` (the Vercel project name, default `reel-scripts-owner`).
-Until both secrets are set the step does nothing.
+Settings: `VERCEL_TOKEN` (secret, required), `REEL_PAGE_PASSWORD` (secret,
+optional) and `REEL_PAGE_PROJECT` (the Vercel project name, default
+`reel-scripts-owner`). Until `VERCEL_TOKEN` is set the step does nothing.
 
 ```bash
 python -m src.main --owner-reel-script --dry-run   # show the latest finished day's script

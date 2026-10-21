@@ -166,11 +166,26 @@ def test_one_script_per_day_and_nothing_goes_to_a_channel(db):
     assert {r.provider for r in db.list_deliveries()} == {"vercel"}            # no telegram, no whapi
 
 
-def test_without_the_page_settings_nothing_is_written_or_asked(db):
+def test_without_a_vercel_token_nothing_is_written_or_asked(db):
     asked = []
     outcome, script, detail = rs.run(db, SimpleNamespace(**{**vars(SETTINGS), "gemini_api_key": "k"}), now=ist(DAY, 23, 40),
-                                     environ={}, ask=lambda *a, **k: asked.append(1) or GOOD_AI)
+                                     environ={"REEL_PAGE_PASSWORD": PASSWORD}, ask=lambda *a, **k: asked.append(1) or GOOD_AI)
     assert outcome == "NOT_CONFIGURED" and script is None and asked == []
+
+
+def test_without_a_password_the_script_is_published_as_it_is(db):
+    log = []
+    outcome, script, _ = rs.run(db, SETTINGS, now=ist(DAY, 23, 40), environ={"VERCEL_TOKEN": "tok"}, call=fake_vercel(log))
+    assert outcome == "SENT"
+    files = {f["file"]: f["data"] for f in log[0][2]["files"]}
+    data = json.loads(files["script.json"])
+    assert data["v"] == 0 and data["plain"]["title"] == script.title and data["plain"]["lines"] == script.lines
+    assert files["robots.txt"] == "User-agent: *\nDisallow: /\n"
+
+
+def test_the_page_shows_a_plain_script_straight_away_and_asks_for_a_password_only_when_encrypted():
+    page = (rs.PAGE_DIR / "index.html").read_text(encoding="utf-8")
+    assert 'id="lock" class="hidden"' in page and "if (data.plain) { show(data.plain)" in page
 
 
 def test_a_failed_publish_is_recorded_and_retried(db):
