@@ -150,9 +150,9 @@ def test_deploy_sets_the_settings_and_publishes_only_the_receiver():
         return {}
     settings = SimpleNamespace(telegram_bot_token="123:TEST", telegram_chat_id="@example", whapi_token="whapi-TEST",
                                whatsapp_announcement_chat_id="120363000000005555@newsletter", whapi_base_url="https://gate.whapi.cloud")
-    address = trade_alerts.deploy(settings, "vercel-token", SECRET, call=call)
+    address = trade_alerts.deploy(settings, "vercel-token", SECRET, call=call, whatsapp=True)
     assert address == "https://trade-alerts-owner.vercel.app"
-    env_call = next(p for m, path, p in log if "/env" in path)
+    env_call = next(p for m, path, p in log if "/env" in path and m == "POST")
     assert {v["key"] for v in env_call} == {"TRADE_WEBHOOK_SECRET", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "WHAPI_TOKEN",
                                             "WHATSAPP_CHAT_ID", "WHAPI_BASE_URL"}
     assert all(v["type"] == "encrypted" for v in env_call)
@@ -250,3 +250,29 @@ def test_the_owner_is_found_from_the_setup_word_only():
         return {"ok": True}
     assert trade_alerts.find_owner_id("tok", call=call) == "424242" and calls == ["deleteWebhook", "getUpdates"]
     assert trade_alerts.find_owner_id("tok", call=lambda m, p: {"result": []} if m == "getUpdates" else {}) is None
+
+
+def test_with_whatsapp_off_its_settings_are_removed_from_the_receiver():
+    log = []
+
+    def call(method, path, token, payload=None):
+        log.append((method, path, payload))
+        if path.startswith("/v9/projects/") and path.endswith("/env"):
+            return {"envs": [{"id": "e1", "key": "WHAPI_TOKEN"}, {"id": "e2", "key": "WHATSAPP_CHAT_ID"},
+                             {"id": "e3", "key": "TELEGRAM_BOT_TOKEN"}]}
+        if path.startswith("/v9/projects/"):
+            return {"id": "prj_9"}
+        if path == "/v13/deployments":
+            return {"id": "dpl_1", "projectId": "prj_9"}
+        if path.startswith("/v6/deployments"):
+            return {"deployments": [{"uid": "dpl_1"}]}
+        return {}
+    settings = SimpleNamespace(telegram_bot_token="123:TEST", telegram_chat_id="@example", whapi_token="whapi-TEST",
+                               whatsapp_announcement_chat_id="120363000000005555@newsletter", whapi_base_url="https://gate.whapi.cloud")
+    trade_alerts.deploy(settings, "vercel-token", SECRET, call=call)
+    posted = next(p for m, path, p in log if path.endswith("/env?upsert=true"))
+    assert not {v["key"] for v in posted} & set(trade_alerts.WHATSAPP_KEYS)
+    deleted = [path for m, path, p in log if m == "DELETE" and "/env/" in path]
+    assert deleted == ["/v9/projects/prj_9/env/e1", "/v9/projects/prj_9/env/e2"]
+    order = [path for m, path, p in log]
+    assert order.index("/v9/projects/prj_9/env/e2") < order.index("/v13/deployments")   # removed before the new deployment

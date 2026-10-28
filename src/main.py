@@ -539,7 +539,8 @@ def run_deploy_trade_alerts(settings: Settings) -> int:
         if owner:
             trade_alerts.save_setting(env_file, "OWNER_TELEGRAM_ID", owner)
     try:
-        address = trade_alerts.deploy(settings, token, secret,
+        whatsapp_on = (os.environ.get("WHATSAPP_ENABLED") or "").strip().lower() == "true"
+        address = trade_alerts.deploy(settings, token, secret, whatsapp=whatsapp_on,
                                       extra={"TELEGRAM_WEBHOOK_SECRET": hook_secret, "OWNER_TELEGRAM_ID": owner})
         if owner:
             trade_alerts.set_webhook(settings.telegram_bot_token, f"{address}/api/telegram", hook_secret)

@@ -95,18 +95,21 @@ def receiver_files() -> dict[str, str]:
     }
 
 
+WHATSAPP_KEYS = ("WHAPI_TOKEN", "WHATSAPP_CHAT_ID", "WHAPI_BASE_URL")
+
+
 def deploy(settings: Settings, token: str, secret: str, *, call=reel_script._vercel, project: str = PROJECT,
-           extra: dict | None = None) -> str:
+           extra: dict | None = None, whatsapp: bool = False) -> str:
     """Create the project if needed, set its environment variables, deploy. Returns the receiver's address."""
     values = {
         "TRADE_WEBHOOK_SECRET": secret,
         "TELEGRAM_BOT_TOKEN": settings.telegram_bot_token or "",
         "TELEGRAM_CHAT_ID": settings.telegram_chat_id or "",
-        "WHAPI_TOKEN": settings.whapi_token or "",
-        "WHATSAPP_CHAT_ID": settings.whatsapp_announcement_chat_id or "",
-        "WHAPI_BASE_URL": settings.whapi_base_url,
         **(extra or {}),
     }
+    if whatsapp:
+        values.update({"WHAPI_TOKEN": settings.whapi_token or "", "WHATSAPP_CHAT_ID": settings.whatsapp_announcement_chat_id or "",
+                       "WHAPI_BASE_URL": settings.whapi_base_url})
     missing = [name for name in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID") if not values[name]]
     if missing:
         raise TradeAlertsError("Missing settings: " + ", ".join(missing))
@@ -119,5 +122,11 @@ def deploy(settings: Settings, token: str, secret: str, *, call=reel_script._ver
         raise TradeAlertsError("Vercel did not return the project.")
     call("POST", f"/v10/projects/{project_id}/env?upsert=true", token,
          [{"key": key, "value": value, "type": "encrypted", "target": ["production"]} for key, value in values.items() if value])
+    if not whatsapp:
+        # WhatsApp is switched off: remove its settings, so the receiver posts to Telegram only.
+        existing = call("GET", f"/v9/projects/{project_id}/env", token).get("envs") or []
+        for variable in existing:
+            if variable.get("key") in WHATSAPP_KEYS and variable.get("id"):
+                call("DELETE", f"/v9/projects/{project_id}/env/{variable['id']}", token)
     address, _ = reel_script.publish(receiver_files(), token, project, call=call)
     return address
