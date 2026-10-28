@@ -22,7 +22,7 @@
 # To stop the automation: disable the job on cron-job.org, or
 # Actions tab -> "Production" -> "..." -> Disable workflow.
 
-name: Production (sends WhatsApp messages)
+name: Production (news bot)
 
 on:
   workflow_dispatch:
